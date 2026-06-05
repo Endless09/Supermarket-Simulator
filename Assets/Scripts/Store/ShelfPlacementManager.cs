@@ -20,9 +20,12 @@ public class ShelfPlacementManager : MonoBehaviour
     private bool waitingForPlacementClickRelease;
     private Shelf shelfPreviewInstance;
     private Shelf runtimeShelfTemplate;
+    private Shelf movingShelf;
+    private Vector3 movingShelfOriginalPosition;
     private float cachedTemplateBottomLift = -1f;
 
     public bool IsPlacingShelf { get; private set; }
+    public bool IsMovingShelf => movingShelf != null;
 
     public void Initialize(
         GameManager owner,
@@ -120,12 +123,37 @@ public class ShelfPlacementManager : MonoBehaviour
         Debug.Log("Shelf purchased. Left click on the floor to place it. Right click to cancel.");
     }
 
+    public bool StartMovingShelf(Shelf shelf)
+    {
+        if (IsPlacingShelf || shelf == null)
+        {
+            return false;
+        }
+
+        movingShelf = shelf;
+        movingShelfOriginalPosition = shelf.transform.position;
+        IsPlacingShelf = true;
+        hasUnplacedShelfPurchase = false;
+        waitingForPlacementClickRelease = gameManager.IsLeftMouseButtonHeld();
+        movingShelf.gameObject.SetActive(false);
+        CreateShelfPreview();
+        Debug.Log("Moving shelf. Left click on the floor to place it. Right click to cancel.");
+        return true;
+    }
+
     public void CancelShelfPlacement()
     {
         MoneyManager moneyManager = gameManager != null ? gameManager.MoneyManager : null;
         if (IsPlacingShelf && hasUnplacedShelfPurchase && moneyManager != null)
         {
             moneyManager.AddMoney(shelfBuyCost);
+        }
+
+        if (movingShelf != null)
+        {
+            movingShelf.transform.position = movingShelfOriginalPosition;
+            movingShelf.gameObject.SetActive(true);
+            movingShelf = null;
         }
 
         IsPlacingShelf = false;
@@ -211,14 +239,24 @@ public class ShelfPlacementManager : MonoBehaviour
         float baseLift = GetBasePlacementLift(addHeightOffset);
         spawnPosition.y += baseLift;
 
-        Shelf newShelf = Instantiate(GetShelfTemplate(), spawnPosition, Quaternion.identity);
-        if (newShelf != null)
+        if (movingShelf != null)
         {
-            newShelf.gameObject.SetActive(true);
-            newShelf.InitializePlacedShelf(null);
+            movingShelf.transform.position = spawnPosition;
+            movingShelf.gameObject.SetActive(true);
+            movingShelf = null;
+        }
+        else
+        {
+            Shelf newShelf = Instantiate(GetShelfTemplate(), spawnPosition, Quaternion.identity);
+            if (newShelf != null)
+            {
+                newShelf.gameObject.SetActive(true);
+                newShelf.InitializePlacedShelf(null);
+            }
+
+            placedShelfCount++;
         }
 
-        placedShelfCount++;
         IsPlacingShelf = false;
         hasUnplacedShelfPurchase = false;
         waitingForPlacementClickRelease = false;

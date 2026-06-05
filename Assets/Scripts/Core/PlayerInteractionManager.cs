@@ -33,6 +33,16 @@ public class PlayerInteractionManager : MonoBehaviour
         bool isLookingAtBackroomDropZone = false;
         bool isLookingAtTrashZone = false;
 
+        if (gameManager.IsMovingShelf)
+        {
+            return "Left click to place shelf, right click to cancel";
+        }
+
+        if (gameManager.IsPlacingShelf)
+        {
+            return "Left click to place new shelf, right click to cancel";
+        }
+
         if (deliveryManager != null &&
             deliveryManager.IsCarryingCrate &&
             warehouseManager != null &&

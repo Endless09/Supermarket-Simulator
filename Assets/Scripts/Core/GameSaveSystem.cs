@@ -23,7 +23,7 @@ public class GameSaveSystem : MonoBehaviour
 
     public void SaveGame()
     {
-        if (gameManager == null)
+        if (gameManager == null || !gameManager.CanSaveGame)
         {
             return;
         }

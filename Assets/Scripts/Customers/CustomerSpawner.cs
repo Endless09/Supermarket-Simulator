@@ -19,6 +19,14 @@ public class CustomerSpawner : MonoBehaviour
     [SerializeField] private int maxItemsPerCustomer = 2;
 
     private readonly List<Customer> activeCustomers = new List<Customer>();
+    public int ActiveCustomerCount
+    {
+        get
+        {
+            CleanupCustomerList();
+            return activeCustomers.Count;
+        }
+    }
 
     private void Start()
     {
@@ -32,6 +40,11 @@ public class CustomerSpawner : MonoBehaviour
             yield return new WaitForSeconds(spawnInterval);
 
             CleanupCustomerList();
+
+            if (GameManager.Instance != null && !GameManager.Instance.IsStoreOpen)
+            {
+                continue;
+            }
 
             if (activeCustomers.Count >= maxCustomersInStore)
             {
@@ -108,5 +121,18 @@ public class CustomerSpawner : MonoBehaviour
     private void CleanupCustomerList()
     {
         activeCustomers.RemoveAll(customer => customer == null);
+    }
+
+    public void ClearActiveCustomers()
+    {
+        foreach (Customer customer in activeCustomers)
+        {
+            if (customer != null)
+            {
+                Destroy(customer.gameObject);
+            }
+        }
+
+        activeCustomers.Clear();
     }
 }

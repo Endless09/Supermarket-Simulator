@@ -11,6 +11,12 @@ public class GameSaveData
     public int currentDay;
     public float currentMoney;
     public string selectedProductName;
+    public bool hasDayNightCycleState;
+    public bool hasDayPhaseState;
+    public int dayPhase;
+    public float currentTimeOfDayHours;
+    public float currentDayProgress;
+    public bool isStoreOpen;
     public List<InventorySaveEntry> backroomInventory = new List<InventorySaveEntry>();
     public List<ShelfSaveEntry> shelves = new List<ShelfSaveEntry>();
     public List<DeliveryManager.QueuedDeliveryState> deliveries = new List<DeliveryManager.QueuedDeliveryState>();
