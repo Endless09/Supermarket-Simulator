@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 
 /// <summary>
@@ -15,13 +16,16 @@ public class ShelfPlacementManager : MonoBehaviour
     private Vector3 firstShelfPosition;
     private Vector3 shelfSpacing;
     private Color shelfPreviewColor;
+    private Color invalidShelfPreviewColor = new Color(1f, 0.2f, 0.16f, 0.75f);
     private bool hasUnplacedShelfPurchase;
     private int placedShelfCount;
     private bool waitingForPlacementClickRelease;
     private Shelf shelfPreviewInstance;
+    private MeshRenderer[] shelfPreviewRenderers;
     private Shelf runtimeShelfTemplate;
     private Shelf movingShelf;
     private Vector3 movingShelfOriginalPosition;
+    private bool currentPreviewPlacementValid;
     private float cachedTemplateBottomLift = -1f;
 
     public bool IsPlacingShelf { get; private set; }
@@ -239,6 +243,12 @@ public class ShelfPlacementManager : MonoBehaviour
         float baseLift = GetBasePlacementLift(addHeightOffset);
         spawnPosition.y += baseLift;
 
+        if (!IsPlacementPositionValid(spawnPosition))
+        {
+            Debug.Log("Cannot place shelf here. Move it away from shelves, walls, customers, checkout, or warehouse racks.");
+            return;
+        }
+
         if (movingShelf != null)
         {
             movingShelf.transform.position = spawnPosition;
@@ -277,6 +287,8 @@ public class ShelfPlacementManager : MonoBehaviour
             Vector3 previewPosition = placementPosition;
             previewPosition.y += GetBasePlacementLift(true);
             shelfPreviewInstance.transform.position = previewPosition;
+            currentPreviewPlacementValid = IsPlacementPositionValid(previewPosition);
+            ApplyShelfPreviewColor(currentPreviewPlacementValid);
 
             if (!shelfPreviewInstance.gameObject.activeSelf)
             {
@@ -286,6 +298,7 @@ public class ShelfPlacementManager : MonoBehaviour
         else if (shelfPreviewInstance.gameObject.activeSelf)
         {
             shelfPreviewInstance.gameObject.SetActive(false);
+            currentPreviewPlacementValid = false;
         }
     }
 
@@ -311,8 +324,8 @@ public class ShelfPlacementManager : MonoBehaviour
             previewCollider.enabled = false;
         }
 
-        MeshRenderer[] previewRenderers = shelfPreviewInstance.GetComponentsInChildren<MeshRenderer>();
-        foreach (MeshRenderer previewRenderer in previewRenderers)
+        shelfPreviewRenderers = shelfPreviewInstance.GetComponentsInChildren<MeshRenderer>();
+        foreach (MeshRenderer previewRenderer in shelfPreviewRenderers)
         {
             previewRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             previewRenderer.receiveShadows = false;
@@ -323,6 +336,181 @@ public class ShelfPlacementManager : MonoBehaviour
         }
 
         shelfPreviewInstance.gameObject.SetActive(false);
+    }
+
+    private bool IsPlacementPositionValid(Vector3 shelfWorldPosition)
+    {
+        Bounds placementBounds = GetShelfPlacementBounds(shelfWorldPosition);
+        if (placementBounds.size == Vector3.zero)
+        {
+            return true;
+        }
+
+        Vector3 overlapCenter = placementBounds.center;
+        Vector3 overlapHalfExtents = placementBounds.extents;
+        overlapHalfExtents.x = Mathf.Max(0.05f, overlapHalfExtents.x - 0.05f);
+        overlapHalfExtents.y = Mathf.Max(0.05f, overlapHalfExtents.y - 0.04f);
+        overlapHalfExtents.z = Mathf.Max(0.05f, overlapHalfExtents.z - 0.05f);
+
+        Collider[] overlaps = Physics.OverlapBox(
+            overlapCenter,
+            overlapHalfExtents,
+            Quaternion.identity,
+            ~0,
+            QueryTriggerInteraction.Collide);
+
+        foreach (Collider overlap in overlaps)
+        {
+            if (IsIgnoredPlacementOverlap(overlap, placementBounds))
+            {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private Bounds GetShelfPlacementBounds(Vector3 shelfWorldPosition)
+    {
+        if (shelfPreviewInstance != null)
+        {
+            Bounds previewBounds = CalculateObjectBounds(shelfPreviewInstance.gameObject);
+            if (previewBounds.size != Vector3.zero)
+            {
+                return previewBounds;
+            }
+        }
+
+        Shelf template = GetShelfTemplate();
+        if (template == null)
+        {
+            return new Bounds(shelfWorldPosition, Vector3.zero);
+        }
+
+        Bounds templateBounds = CalculateObjectBounds(template.gameObject);
+        if (templateBounds.size == Vector3.zero)
+        {
+            return new Bounds(shelfWorldPosition, Vector3.zero);
+        }
+
+        Vector3 offsetFromTemplateRoot = templateBounds.center - template.transform.position;
+        return new Bounds(shelfWorldPosition + offsetFromTemplateRoot, templateBounds.size);
+    }
+
+    private Bounds CalculateObjectBounds(GameObject sourceObject)
+    {
+        Bounds bounds = new Bounds();
+        bool hasBounds = false;
+
+        Collider[] colliders = sourceObject.GetComponentsInChildren<Collider>(true);
+        foreach (Collider collider in colliders)
+        {
+            if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = collider.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(collider.bounds);
+            }
+        }
+
+        if (hasBounds)
+        {
+            return bounds;
+        }
+
+        Renderer[] renderers = sourceObject.GetComponentsInChildren<Renderer>(true);
+        foreach (Renderer renderer in renderers)
+        {
+            if (renderer == null || renderer.GetComponentInParent<TextMeshPro>() != null)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        return hasBounds ? bounds : new Bounds(sourceObject.transform.position, Vector3.zero);
+    }
+
+    private bool IsIgnoredPlacementOverlap(Collider overlap, Bounds placementBounds)
+    {
+        if (overlap == null)
+        {
+            return true;
+        }
+
+        if (shelfPreviewInstance != null && overlap.transform.IsChildOf(shelfPreviewInstance.transform))
+        {
+            return true;
+        }
+
+        if (movingShelf != null && overlap.transform.IsChildOf(movingShelf.transform))
+        {
+            return true;
+        }
+
+        if (runtimeShelfTemplate != null && overlap.transform.IsChildOf(runtimeShelfTemplate.transform))
+        {
+            return true;
+        }
+
+        if (shelfPrefab != null &&
+            !shelfPrefab.gameObject.scene.IsValid() &&
+            overlap.transform.IsChildOf(shelfPrefab.transform))
+        {
+            return true;
+        }
+
+        return IsPlacementSurface(overlap, placementBounds);
+    }
+
+    private bool IsPlacementSurface(Collider overlap, Bounds placementBounds)
+    {
+        Bounds overlapBounds = overlap.bounds;
+        bool isBelowShelf = overlapBounds.max.y <= placementBounds.min.y + 0.12f;
+        bool isThinSurface = overlapBounds.size.y <= 0.2f;
+        string overlapName = overlap.gameObject.name;
+        bool looksLikeGround = overlapName.Contains("Floor") ||
+                               overlapName.Contains("Ground") ||
+                               overlapName.Contains("Pad") ||
+                               overlapName.Contains("Zone");
+
+        return isBelowShelf && (isThinSurface || looksLikeGround);
+    }
+
+    private void ApplyShelfPreviewColor(bool isValidPlacement)
+    {
+        if (shelfPreviewRenderers == null)
+        {
+            return;
+        }
+
+        Color targetColor = isValidPlacement ? shelfPreviewColor : invalidShelfPreviewColor;
+        foreach (MeshRenderer previewRenderer in shelfPreviewRenderers)
+        {
+            if (previewRenderer != null && previewRenderer.material != null)
+            {
+                previewRenderer.material.color = targetColor;
+            }
+        }
     }
 
     private void CacheRuntimeShelfTemplate()
