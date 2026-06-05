@@ -16,7 +16,11 @@ public class ShelfPlacementManager : MonoBehaviour
     private Vector3 firstShelfPosition;
     private Vector3 shelfSpacing;
     private Color shelfPreviewColor;
-    private Color invalidShelfPreviewColor = new Color(1f, 0.2f, 0.16f, 0.75f);
+    [Header("Grid Placement")]
+    [SerializeField] private bool snapShelvesToGrid = true;
+    [SerializeField] private float shelfGridSize = 1f;
+    [SerializeField] private Vector3 shelfGridOrigin = Vector3.zero;
+    [SerializeField] private Color invalidShelfPreviewColor = new Color(1f, 0.2f, 0.16f, 0.75f);
     private bool hasUnplacedShelfPurchase;
     private int placedShelfCount;
     private bool waitingForPlacementClickRelease;
@@ -239,7 +243,7 @@ public class ShelfPlacementManager : MonoBehaviour
 
     private void PlaceShelfAtPosition(Vector3 worldPosition, bool addHeightOffset)
     {
-        Vector3 spawnPosition = worldPosition;
+        Vector3 spawnPosition = GetShelfPlacementGroundPosition(worldPosition);
         float baseLift = GetBasePlacementLift(addHeightOffset);
         spawnPosition.y += baseLift;
 
@@ -284,7 +288,7 @@ public class ShelfPlacementManager : MonoBehaviour
 
         if (TryGetPlacementPosition(out Vector3 placementPosition))
         {
-            Vector3 previewPosition = placementPosition;
+            Vector3 previewPosition = GetShelfPlacementGroundPosition(placementPosition);
             previewPosition.y += GetBasePlacementLift(true);
             shelfPreviewInstance.transform.position = previewPosition;
             currentPreviewPlacementValid = IsPlacementPositionValid(previewPosition);
@@ -300,6 +304,24 @@ public class ShelfPlacementManager : MonoBehaviour
             shelfPreviewInstance.gameObject.SetActive(false);
             currentPreviewPlacementValid = false;
         }
+    }
+
+    private Vector3 GetShelfPlacementGroundPosition(Vector3 worldPosition)
+    {
+        if (!snapShelvesToGrid || shelfGridSize <= 0.01f)
+        {
+            return worldPosition;
+        }
+
+        Vector3 snappedPosition = worldPosition;
+        snappedPosition.x = SnapCoordinate(worldPosition.x, shelfGridOrigin.x, shelfGridSize);
+        snappedPosition.z = SnapCoordinate(worldPosition.z, shelfGridOrigin.z, shelfGridSize);
+        return snappedPosition;
+    }
+
+    private float SnapCoordinate(float value, float origin, float gridSize)
+    {
+        return origin + (Mathf.Round((value - origin) / gridSize) * gridSize);
     }
 
     private void CreateShelfPreview()

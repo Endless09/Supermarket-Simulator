@@ -3,6 +3,9 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 /// <summary>
 /// Builds and updates the prototype HUD for store status, product ordering, shelf focus, and current tasks.
@@ -14,6 +17,8 @@ public class BasicUIManager : MonoBehaviour
 
     private static readonly Color PanelColor = new Color(0.06f, 0.075f, 0.09f, 0.82f);
     private static readonly Color TaskPanelColor = new Color(0.08f, 0.12f, 0.14f, 0.9f);
+    private static readonly Color PauseBackdropColor = new Color(0.01f, 0.015f, 0.018f, 0.72f);
+    private static readonly Color PausePanelColor = new Color(0.055f, 0.085f, 0.11f, 0.96f);
     private static readonly Color ButtonColor = new Color(0.9f, 0.95f, 0.94f, 0.96f);
     private static readonly Color ButtonHoverColor = new Color(0.78f, 0.93f, 0.88f, 1f);
     private static readonly Color ButtonPressedColor = new Color(0.42f, 0.7f, 0.64f, 1f);
@@ -53,10 +58,42 @@ public class BasicUIManager : MonoBehaviour
     private RectTransform taskPanel;
     private RectTransform actionPanel;
     private RectTransform productButtonPanel;
+    private RectTransform pauseMenuRoot;
+    private RectTransform pauseMainPanel;
+    private RectTransform pauseSettingsPanel;
+    private RectTransform computerRoot;
+    private RectTransform computerSidebarPanel;
+    private RectTransform computerContentPanel;
+    private RectTransform computerMarketPanel;
+    private RectTransform computerFurniturePanel;
+    private RectTransform computerProductButtonPanel;
+    private TMP_Text computerTitleText;
+    private TMP_Text computerSelectedProductText;
+    private TMP_Text computerMarketStockText;
+    private TMP_Text computerFurnitureText;
+    private TMP_Text pauseSettingsText;
     private Button saveGameButton;
     private Button loadGameButton;
     private Button newGameButton;
     private Button moveSelectedShelfButton;
+    private Button pauseResumeButton;
+    private Button pauseSaveButton;
+    private Button pauseLoadButton;
+    private Button pauseSettingsButton;
+    private Button pauseMainMenuButton;
+    private Button pauseExitGameButton;
+    private Button pauseSettingsBackButton;
+    private readonly List<Button> computerProductButtons = new List<Button>();
+    private Button computerMarketTabButton;
+    private Button computerFurnitureTabButton;
+    private Button computerCloseButton;
+    private Button computerOrderStockButton;
+    private Button computerBuyShelfButton;
+    private bool isPauseMenuOpen;
+    private bool isComputerOpen;
+    private float timeScaleBeforePause = 1f;
+
+    public bool IsBlockingGameplayInput => isPauseMenuOpen || isComputerOpen;
 
     private void Awake()
     {
@@ -74,6 +111,8 @@ public class BasicUIManager : MonoBehaviour
         BuildFurnitureActionButtons();
         ConfigureHudLayout();
         BuildProductSelectionButtons();
+        BuildPauseMenu();
+        BuildStoreComputerUI();
 
         moneyManager = FindAnyObjectByType<MoneyManager>();
 
@@ -102,6 +141,11 @@ public class BasicUIManager : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (isPauseMenuOpen)
+        {
+            Time.timeScale = timeScaleBeforePause <= 0f ? 1f : timeScaleBeforePause;
+        }
+
         if (moneyManager != null)
         {
             moneyManager.OnMoneyChanged -= UpdateMoneyText;
@@ -115,6 +159,18 @@ public class BasicUIManager : MonoBehaviour
 
     private void Update()
     {
+        if (GetPausePressed())
+        {
+            if (isComputerOpen)
+            {
+                CloseStoreComputer();
+            }
+            else
+            {
+                TogglePauseMenu();
+            }
+        }
+
         UpdateDayText();
         UpdateInventoryText();
         UpdateSelectedShelfText();
@@ -122,6 +178,8 @@ public class BasicUIManager : MonoBehaviour
         UpdatePlayerModeText();
         UpdateInteractionPromptText();
         UpdatePersistenceButtonStates();
+        UpdatePauseMenuButtonStates();
+        UpdateStoreComputerButtonStates();
     }
 
     public void BuyShelfButton()
@@ -235,6 +293,49 @@ public class BasicUIManager : MonoBehaviour
         }
     }
 
+    public void ResumeGameButton()
+    {
+        SetPauseMenuOpen(false);
+    }
+
+    public void SettingsButton()
+    {
+        ShowPauseSettingsPanel(true);
+    }
+
+    public void MainMenuButton()
+    {
+        Debug.Log("Main Menu is not wired yet. Later this can load a dedicated title scene.");
+    }
+
+    public void ExitGameButton()
+    {
+        Application.Quit();
+#if UNITY_EDITOR
+        Debug.Log("Exit Game requested. Application.Quit only closes a built game, not Play Mode in the editor.");
+#endif
+    }
+
+    public void OpenStoreComputer()
+    {
+        SetStoreComputerOpen(true);
+    }
+
+    public void CloseStoreComputer()
+    {
+        SetStoreComputerOpen(false);
+    }
+
+    public void ShowComputerMarket()
+    {
+        ShowComputerPanel(computerMarketPanel);
+    }
+
+    public void ShowComputerFurniture()
+    {
+        ShowComputerPanel(computerFurniturePanel);
+    }
+
     public void SelectProduct(ProductData product)
     {
         selectedProduct = product;
@@ -320,6 +421,8 @@ public class BasicUIManager : MonoBehaviour
             "Backroom: " + stock +
             "\nAt loading dock: " + (atDock > 0 ? "+" + atDock : "None") +
             "\nIncoming delivery: " + incomingLabel;
+
+        UpdateComputerTexts();
     }
 
     private void UpdateSelectedProductText()
@@ -339,6 +442,8 @@ public class BasicUIManager : MonoBehaviour
             "Ordering: " + selectedProduct.productName +
             "\nBuy " + restockPurchaseAmount + " for $" +
             (selectedProduct.wholesaleCost * restockPurchaseAmount).ToString("0.00");
+
+        UpdateComputerTexts();
     }
 
     private void UpdateSelectedShelfText()
@@ -512,16 +617,24 @@ public class BasicUIManager : MonoBehaviour
         }
     }
 
+    private void HideButton(Button button)
+    {
+        if (button != null)
+        {
+            button.gameObject.SetActive(false);
+        }
+    }
+
     private void ConfigureHudLayout()
     {
         statusPanel = CreatePanel("StoreStatusPanel", new Vector2(0f, 1f), new Vector2(20f, -20f), new Vector2(330f, 154f), PanelColor);
         productPanel = CreatePanel("ProductOrderPanel", new Vector2(0f, 0.5f), new Vector2(20f, 92f), new Vector2(360f, 356f), PanelColor);
         shelfPanel = CreatePanel("ShelfFocusPanel", new Vector2(0f, 0f), new Vector2(20f, 20f), new Vector2(400f, 154f), PanelColor);
         taskPanel = CreatePanel("CurrentTaskPanel", new Vector2(0.5f, 0f), new Vector2(0f, 24f), new Vector2(620f, 150f), TaskPanelColor);
-        actionPanel = CreatePanel("ActionPanel", new Vector2(1f, 1f), new Vector2(-20f, -20f), new Vector2(300f, 580f), PanelColor);
+        actionPanel = CreatePanel("ActionPanel", new Vector2(1f, 1f), new Vector2(-20f, -20f), new Vector2(300f, 260f), PanelColor);
+        productPanel.gameObject.SetActive(false);
 
         AddHeading(statusPanel, "Store");
-        AddHeading(productPanel, "Product Order");
         AddHeading(shelfPanel, "Selected Shelf");
         AddHeading(taskPanel, "Next Step");
         AddHeading(actionPanel, "Actions");
@@ -529,20 +642,18 @@ public class BasicUIManager : MonoBehaviour
         ConfigureHudLabel(moneyText, statusPanel, new Vector2(14f, -44f), new Vector2(112f, 70f), 26f, TextAlignmentOptions.TopLeft, TextColor);
         ConfigureHudLabel(dayText, statusPanel, new Vector2(134f, -42f), new Vector2(188f, 102f), 23f, TextAlignmentOptions.TopLeft, TextColor);
 
-        ConfigureHudLabel(selectedProductText, productPanel, new Vector2(14f, -44f), new Vector2(332f, 72f), 21f, TextAlignmentOptions.TopLeft, TextColor);
-        ConfigureHudLabel(inventoryText, productPanel, new Vector2(14f, -136f), new Vector2(332f, 88f), 21f, TextAlignmentOptions.TopLeft, TextColor);
         ConfigureHudLabel(selectedShelfText, shelfPanel, new Vector2(14f, -44f), new Vector2(372f, 102f), 21f, TextAlignmentOptions.TopLeft, TextColor);
         ConfigureHudLabel(deliveryTaskText, taskPanel, new Vector2(16f, -44f), new Vector2(588f, 58f), 23f, TextAlignmentOptions.TopLeft, TextColor);
         ConfigureHudLabel(interactionPromptText, taskPanel, new Vector2(16f, -104f), new Vector2(588f, 30f), 22f, TextAlignmentOptions.TopLeft, SelectedProductColor);
-        ConfigureHudLabel(playerModeText, actionPanel, new Vector2(16f, -478f), new Vector2(268f, 80f), 18f, TextAlignmentOptions.TopLeft, MutedTextColor);
+        ConfigureHudLabel(playerModeText, actionPanel, new Vector2(16f, -154f), new Vector2(268f, 80f), 18f, TextAlignmentOptions.TopLeft, MutedTextColor);
 
-        PlaceActionButton(buyShelfButton, new Vector2(16f, -52f), "Buy Shelf");
-        PlaceActionButton(buySelectedProductStockButton, new Vector2(16f, -94f), "Order Selected Stock");
-        PlaceActionButton(moveSelectedShelfButton, new Vector2(16f, -136f), "Move Selected Shelf");
-        PlaceActionButton(nextDayButton, new Vector2(16f, -194f), GameManager.Instance != null ? GameManager.Instance.DayControlButtonText : "Start Day");
-        PlaceActionButton(saveGameButton, new Vector2(16f, -272f), "Save Game");
-        PlaceActionButton(loadGameButton, new Vector2(16f, -314f), "Load Game");
-        PlaceActionButton(newGameButton, new Vector2(16f, -356f), "New Game");
+        HideButton(buyShelfButton);
+        HideButton(buySelectedProductStockButton);
+        HideButton(saveGameButton);
+        HideButton(loadGameButton);
+        HideButton(newGameButton);
+        PlaceActionButton(moveSelectedShelfButton, new Vector2(16f, -52f), "Move Selected Shelf");
+        PlaceActionButton(nextDayButton, new Vector2(16f, -94f), GameManager.Instance != null ? GameManager.Instance.DayControlButtonText : "Start Day");
     }
 
     private void BuildProductSelectionButtons()
@@ -609,6 +720,423 @@ public class BasicUIManager : MonoBehaviour
         if (moveSelectedShelfButton == null)
         {
             moveSelectedShelfButton = CreateActionButton("MoveSelectedShelfButton", "Move Selected Shelf", MoveSelectedShelfButton);
+        }
+    }
+
+    private void BuildPauseMenu()
+    {
+        if (pauseMenuRoot == null)
+        {
+            GameObject rootObject = new GameObject("PauseMenuRoot", typeof(RectTransform), typeof(Image));
+            rootObject.transform.SetParent(canvasRoot, false);
+            pauseMenuRoot = rootObject.GetComponent<RectTransform>();
+        }
+
+        pauseMenuRoot.anchorMin = Vector2.zero;
+        pauseMenuRoot.anchorMax = Vector2.one;
+        pauseMenuRoot.pivot = new Vector2(0.5f, 0.5f);
+        pauseMenuRoot.offsetMin = Vector2.zero;
+        pauseMenuRoot.offsetMax = Vector2.zero;
+
+        Image backdrop = pauseMenuRoot.GetComponent<Image>();
+        if (backdrop == null)
+        {
+            backdrop = pauseMenuRoot.gameObject.AddComponent<Image>();
+        }
+
+        backdrop.color = PauseBackdropColor;
+        backdrop.raycastTarget = true;
+
+        pauseMainPanel = CreatePausePanel("PauseMainPanel", new Vector2(460f, 520f));
+        pauseSettingsPanel = CreatePausePanel("PauseSettingsPanel", new Vector2(560f, 380f));
+
+        AddHeading(pauseMainPanel, "Paused");
+        AddHeading(pauseSettingsPanel, "Settings");
+
+        pauseResumeButton = CreatePauseButton("PauseResumeButton", "Resume", ResumeGameButton, pauseMainPanel, -72f);
+        pauseSaveButton = CreatePauseButton("PauseSaveButton", "Save Game", SaveGameButton, pauseMainPanel, -124f);
+        pauseLoadButton = CreatePauseButton("PauseLoadButton", "Load Game", LoadGameButton, pauseMainPanel, -176f);
+        pauseSettingsButton = CreatePauseButton("PauseSettingsButton", "Settings", SettingsButton, pauseMainPanel, -228f);
+        pauseMainMenuButton = CreatePauseButton("PauseMainMenuButton", "Main Menu (Coming Soon)", MainMenuButton, pauseMainPanel, -280f);
+        pauseExitGameButton = CreatePauseButton("PauseExitGameButton", "Exit Game", ExitGameButton, pauseMainPanel, -360f);
+
+        pauseSettingsText = FindChildText(pauseSettingsPanel, "SettingsText");
+        if (pauseSettingsText == null)
+        {
+            GameObject textObject = new GameObject("SettingsText", typeof(RectTransform));
+            textObject.transform.SetParent(pauseSettingsPanel, false);
+            pauseSettingsText = textObject.AddComponent<TextMeshProUGUI>();
+            CopyFontSettings(pauseSettingsText);
+        }
+
+        ConfigureHudLabel(
+            pauseSettingsText,
+            pauseSettingsPanel,
+            new Vector2(28f, -70f),
+            new Vector2(504f, 180f),
+            22f,
+            TextAlignmentOptions.TopLeft,
+            TextColor);
+        pauseSettingsText.text = "Settings will live here.\n\nGood first options later:\nMouse sensitivity\nVolume\nGraphics quality\nKeybinds";
+
+        pauseSettingsBackButton = CreatePauseButton("PauseSettingsBackButton", "Back", () => ShowPauseSettingsPanel(false), pauseSettingsPanel, -300f);
+
+        SetPauseMenuOpen(false);
+    }
+
+    private void BuildStoreComputerUI()
+    {
+        if (computerRoot == null)
+        {
+            GameObject rootObject = new GameObject("StoreComputerUI", typeof(RectTransform), typeof(Image));
+            rootObject.transform.SetParent(canvasRoot, false);
+            computerRoot = rootObject.GetComponent<RectTransform>();
+        }
+
+        computerRoot.anchorMin = Vector2.zero;
+        computerRoot.anchorMax = Vector2.one;
+        computerRoot.pivot = new Vector2(0.5f, 0.5f);
+        computerRoot.offsetMin = Vector2.zero;
+        computerRoot.offsetMax = Vector2.zero;
+
+        Image background = computerRoot.GetComponent<Image>();
+        if (background == null)
+        {
+            background = computerRoot.gameObject.AddComponent<Image>();
+        }
+
+        background.color = new Color(0.74f, 0.95f, 0.82f, 0.98f);
+        background.raycastTarget = true;
+
+        computerSidebarPanel = CreateComputerPanel("ComputerSidebar", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(250f, 0f), new Color(0.02f, 0.14f, 0.24f, 1f));
+        computerSidebarPanel.anchorMin = new Vector2(0f, 0f);
+        computerSidebarPanel.anchorMax = new Vector2(0f, 1f);
+        computerSidebarPanel.pivot = new Vector2(0f, 0.5f);
+        computerSidebarPanel.sizeDelta = new Vector2(250f, 0f);
+
+        computerContentPanel = CreateComputerPanel("ComputerContent", new Vector2(0f, 0f), new Vector2(250f, 0f), new Vector2(-250f, 0f), new Color(0.86f, 0.94f, 0.96f, 1f));
+        computerContentPanel.anchorMin = new Vector2(0f, 0f);
+        computerContentPanel.anchorMax = new Vector2(1f, 1f);
+        computerContentPanel.pivot = new Vector2(0.5f, 0.5f);
+        computerContentPanel.offsetMin = new Vector2(250f, 0f);
+        computerContentPanel.offsetMax = Vector2.zero;
+
+        computerTitleText = CreateComputerLabel("ComputerTitle", computerSidebarPanel, new Vector2(22f, -24f), new Vector2(206f, 48f), 30f, "STORE OS");
+        computerMarketTabButton = CreateComputerButton("ComputerMarketTab", "Market", ShowComputerMarket, computerSidebarPanel, new Vector2(22f, -100f), new Vector2(206f, 54f));
+        computerFurnitureTabButton = CreateComputerButton("ComputerFurnitureTab", "Furniture", ShowComputerFurniture, computerSidebarPanel, new Vector2(22f, -168f), new Vector2(206f, 54f));
+        computerCloseButton = CreateComputerButton("ComputerCloseButton", "Close", CloseStoreComputer, computerSidebarPanel, new Vector2(22f, -250f), new Vector2(206f, 54f));
+
+        computerMarketPanel = CreateComputerContentPanel("ComputerMarketPanel");
+        computerFurniturePanel = CreateComputerContentPanel("ComputerFurniturePanel");
+        BuildComputerMarketPanel();
+        BuildComputerFurniturePanel();
+
+        SetStoreComputerOpen(false);
+    }
+
+    private void BuildComputerMarketPanel()
+    {
+        AddHeading(computerMarketPanel, "Market - Order Stock");
+        computerSelectedProductText = CreateComputerLabel("ComputerSelectedProductText", computerMarketPanel, new Vector2(28f, -64f), new Vector2(440f, 80f), 24f, string.Empty);
+        computerMarketStockText = CreateComputerLabel("ComputerMarketStockText", computerMarketPanel, new Vector2(500f, -64f), new Vector2(480f, 92f), 22f, string.Empty);
+        computerOrderStockButton = CreateComputerButton("ComputerOrderStockButton", "Order Selected Stock", BuySelectedProductStockButton, computerMarketPanel, new Vector2(28f, -150f), new Vector2(300f, 44f));
+
+        computerProductButtonPanel = FindDirectChildRect(computerMarketPanel, "ComputerProductButtons");
+        if (computerProductButtonPanel == null)
+        {
+            GameObject panelObject = new GameObject("ComputerProductButtons", typeof(RectTransform));
+            panelObject.transform.SetParent(computerMarketPanel, false);
+            computerProductButtonPanel = panelObject.GetComponent<RectTransform>();
+        }
+
+        computerProductButtonPanel.anchorMin = new Vector2(0f, 1f);
+        computerProductButtonPanel.anchorMax = new Vector2(0f, 1f);
+        computerProductButtonPanel.pivot = new Vector2(0f, 1f);
+        computerProductButtonPanel.anchoredPosition = new Vector2(28f, -220f);
+        computerProductButtonPanel.sizeDelta = new Vector2(900f, 520f);
+
+        BuildComputerProductButtons();
+    }
+
+    private void BuildComputerFurniturePanel()
+    {
+        AddHeading(computerFurniturePanel, "Furniture - Order Store Fixtures");
+        computerFurnitureText = CreateComputerLabel(
+            "ComputerFurnitureText",
+            computerFurniturePanel,
+            new Vector2(28f, -72f),
+            new Vector2(720f, 120f),
+            24f,
+            "Shelf\nUnit Price: $50.00\nAdds an empty shelf that can be placed on the store grid.");
+        computerBuyShelfButton = CreateComputerButton("ComputerBuyShelfButton", "Buy Shelf", BuyShelfButton, computerFurniturePanel, new Vector2(28f, -196f), new Vector2(260f, 46f));
+    }
+
+    private void BuildComputerProductButtons()
+    {
+        foreach (Button button in computerProductButtons)
+        {
+            if (button != null)
+            {
+                Destroy(button.gameObject);
+            }
+        }
+
+        computerProductButtons.Clear();
+
+        float buttonWidth = 250f;
+        float buttonHeight = 48f;
+        float spacingX = 18f;
+        float spacingY = 16f;
+        int columns = 3;
+
+        for (int index = 0; index < availableProducts.Count; index++)
+        {
+            ProductData product = availableProducts[index];
+            if (product == null)
+            {
+                continue;
+            }
+
+            int column = index % columns;
+            int row = index / columns;
+            Vector2 position = new Vector2(column * (buttonWidth + spacingX), -(row * (buttonHeight + spacingY)));
+            ProductData capturedProduct = product;
+            Button button = CreateComputerButton(
+                "ComputerProduct_" + product.productName,
+                product.productName,
+                () => SelectProduct(capturedProduct),
+                computerProductButtonPanel,
+                position,
+                new Vector2(buttonWidth, buttonHeight));
+            computerProductButtons.Add(button);
+        }
+    }
+
+    private RectTransform CreatePausePanel(string objectName, Vector2 size)
+    {
+        RectTransform panel = FindDirectChildRect(pauseMenuRoot, objectName);
+        if (panel == null)
+        {
+            GameObject panelObject = new GameObject(objectName, typeof(RectTransform), typeof(Image));
+            panelObject.transform.SetParent(pauseMenuRoot, false);
+            panel = panelObject.GetComponent<RectTransform>();
+        }
+
+        panel.anchorMin = new Vector2(0.5f, 0.5f);
+        panel.anchorMax = new Vector2(0.5f, 0.5f);
+        panel.pivot = new Vector2(0.5f, 0.5f);
+        panel.anchoredPosition = Vector2.zero;
+        panel.sizeDelta = size;
+
+        Image image = panel.GetComponent<Image>();
+        if (image == null)
+        {
+            image = panel.gameObject.AddComponent<Image>();
+        }
+
+        image.color = PausePanelColor;
+        image.raycastTarget = true;
+        return panel;
+    }
+
+    private RectTransform CreateComputerPanel(string objectName, Vector2 anchor, Vector2 anchoredPosition, Vector2 size, Color color)
+    {
+        RectTransform panel = FindDirectChildRect(computerRoot, objectName);
+        if (panel == null)
+        {
+            GameObject panelObject = new GameObject(objectName, typeof(RectTransform), typeof(Image));
+            panelObject.transform.SetParent(computerRoot, false);
+            panel = panelObject.GetComponent<RectTransform>();
+        }
+
+        panel.anchorMin = anchor;
+        panel.anchorMax = anchor;
+        panel.pivot = new Vector2(anchor.x, anchor.y);
+        panel.anchoredPosition = anchoredPosition;
+        panel.sizeDelta = size;
+
+        Image image = panel.GetComponent<Image>();
+        if (image == null)
+        {
+            image = panel.gameObject.AddComponent<Image>();
+        }
+
+        image.color = color;
+        image.raycastTarget = true;
+        return panel;
+    }
+
+    private RectTransform CreateComputerContentPanel(string objectName)
+    {
+        RectTransform panel = FindDirectChildRect(computerContentPanel, objectName);
+        if (panel == null)
+        {
+            GameObject panelObject = new GameObject(objectName, typeof(RectTransform));
+            panelObject.transform.SetParent(computerContentPanel, false);
+            panel = panelObject.GetComponent<RectTransform>();
+        }
+
+        panel.anchorMin = Vector2.zero;
+        panel.anchorMax = Vector2.one;
+        panel.pivot = new Vector2(0.5f, 0.5f);
+        panel.offsetMin = Vector2.zero;
+        panel.offsetMax = Vector2.zero;
+        return panel;
+    }
+
+    private TMP_Text CreateComputerLabel(string objectName, RectTransform parent, Vector2 anchoredPosition, Vector2 size, float fontSize, string text)
+    {
+        TMP_Text label = FindChildText(parent, objectName);
+        if (label == null)
+        {
+            GameObject labelObject = new GameObject(objectName, typeof(RectTransform));
+            labelObject.transform.SetParent(parent, false);
+            label = labelObject.AddComponent<TextMeshProUGUI>();
+            CopyFontSettings(label);
+        }
+
+        ConfigureHudLabel(label, parent, anchoredPosition, size, fontSize, TextAlignmentOptions.TopLeft, TextColor);
+        label.text = text;
+        return label;
+    }
+
+    private Button CreateComputerButton(
+        string objectName,
+        string labelText,
+        UnityAction onClickAction,
+        RectTransform parent,
+        Vector2 anchoredPosition,
+        Vector2 size)
+    {
+        Button button = FindButtonByName(objectName);
+        if (button == null)
+        {
+            GameObject buttonObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button));
+            buttonObject.transform.SetParent(parent, false);
+            button = buttonObject.GetComponent<Button>();
+        }
+
+        button.transform.SetParent(parent, false);
+        button.onClick.RemoveAllListeners();
+        if (onClickAction != null)
+        {
+            button.onClick.AddListener(onClickAction);
+        }
+
+        RectTransform rect = button.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = anchoredPosition;
+        rect.sizeDelta = size;
+
+        SetButtonLabel(button, labelText);
+        StyleButton(button);
+        return button;
+    }
+
+    private Button CreatePauseButton(string objectName, string labelText, UnityAction onClickAction, RectTransform parent, float yPosition)
+    {
+        Button button = FindButtonByName(objectName);
+        if (button == null)
+        {
+            GameObject buttonObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button));
+            buttonObject.transform.SetParent(parent, false);
+            button = buttonObject.GetComponent<Button>();
+        }
+
+        button.transform.SetParent(parent, false);
+        button.onClick.RemoveAllListeners();
+        if (onClickAction != null)
+        {
+            button.onClick.AddListener(onClickAction);
+        }
+
+        RectTransform rect = button.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.anchoredPosition = new Vector2(0f, yPosition);
+        rect.sizeDelta = new Vector2(360f, 42f);
+
+        SetButtonLabel(button, labelText);
+        StyleButton(button);
+        return button;
+    }
+
+    private void TogglePauseMenu()
+    {
+        SetPauseMenuOpen(!isPauseMenuOpen);
+    }
+
+    private void SetPauseMenuOpen(bool isOpen)
+    {
+        isPauseMenuOpen = isOpen;
+
+        if (pauseMenuRoot != null)
+        {
+            pauseMenuRoot.gameObject.SetActive(isPauseMenuOpen);
+        }
+
+        if (isPauseMenuOpen)
+        {
+            timeScaleBeforePause = Time.timeScale <= 0f ? 1f : Time.timeScale;
+            Time.timeScale = 0f;
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            ShowPauseSettingsPanel(false);
+            UpdatePauseMenuButtonStates();
+        }
+        else
+        {
+            Time.timeScale = timeScaleBeforePause <= 0f ? 1f : timeScaleBeforePause;
+        }
+    }
+
+    private void SetStoreComputerOpen(bool isOpen)
+    {
+        isComputerOpen = isOpen;
+
+        if (computerRoot != null)
+        {
+            computerRoot.gameObject.SetActive(isComputerOpen);
+        }
+
+        if (isComputerOpen)
+        {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            ShowComputerMarket();
+            UpdateComputerTexts();
+            UpdateStoreComputerButtonStates();
+        }
+    }
+
+    private void ShowComputerPanel(RectTransform panelToShow)
+    {
+        if (computerMarketPanel != null)
+        {
+            computerMarketPanel.gameObject.SetActive(panelToShow == computerMarketPanel);
+        }
+
+        if (computerFurniturePanel != null)
+        {
+            computerFurniturePanel.gameObject.SetActive(panelToShow == computerFurniturePanel);
+        }
+
+        UpdateStoreComputerButtonStates();
+    }
+
+    private void ShowPauseSettingsPanel(bool showSettings)
+    {
+        if (pauseMainPanel != null)
+        {
+            pauseMainPanel.gameObject.SetActive(!showSettings);
+        }
+
+        if (pauseSettingsPanel != null)
+        {
+            pauseSettingsPanel.gameObject.SetActive(showSettings);
         }
     }
 
@@ -877,6 +1405,64 @@ public class BasicUIManager : MonoBehaviour
                 label.fontStyle = product == selectedProduct ? FontStyles.Bold : FontStyles.Normal;
             }
         }
+
+        UpdateComputerProductButtonVisuals();
+    }
+
+    private void UpdateComputerProductButtonVisuals()
+    {
+        for (int index = 0; index < computerProductButtons.Count; index++)
+        {
+            Button button = computerProductButtons[index];
+            if (button == null)
+            {
+                continue;
+            }
+
+            ProductData product = index < availableProducts.Count ? availableProducts[index] : null;
+            Image image = button.GetComponent<Image>();
+            if (image != null)
+            {
+                image.color = product == selectedProduct ? SelectedProductColor : ButtonColor;
+            }
+
+            TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
+            if (label != null)
+            {
+                label.color = DarkTextColor;
+                label.fontStyle = product == selectedProduct ? FontStyles.Bold : FontStyles.Normal;
+            }
+        }
+    }
+
+    private void UpdateComputerTexts()
+    {
+        if (computerSelectedProductText == null || computerMarketStockText == null)
+        {
+            return;
+        }
+
+        if (selectedProduct == null)
+        {
+            computerSelectedProductText.text = "No product selected";
+            computerMarketStockText.text = "Choose a product to order stock.";
+            return;
+        }
+
+        int stock = GameManager.Instance != null ? GameManager.Instance.GetBackroomStock(selectedProduct) : 0;
+        int incoming = GameManager.Instance != null ? GameManager.Instance.GetIncomingDeliveryAmount(selectedProduct) : 0;
+        int atDock = GameManager.Instance != null ? GameManager.Instance.GetDockDeliveryAmount(selectedProduct) : 0;
+        float orderCost = selectedProduct.wholesaleCost * restockPurchaseAmount;
+
+        computerSelectedProductText.text =
+            selectedProduct.productName +
+            "\nOrder amount: " + restockPurchaseAmount +
+            "\nOrder cost: $" + orderCost.ToString("0.00");
+
+        computerMarketStockText.text =
+            "Backroom stock: " + stock +
+            "\nAt loading dock: " + (atDock > 0 ? "+" + atDock : "None") +
+            "\nIncoming delivery: " + (incoming > 0 ? "+" + incoming : "None");
     }
 
     private void UpdatePersistenceButtonStates()
@@ -895,6 +1481,41 @@ public class BasicUIManager : MonoBehaviour
         SetButtonState(moveSelectedShelfButton, hasShelfTarget && (GameManager.Instance == null || !GameManager.Instance.IsPlacingShelf));
         SetButtonState(buySelectedProductStockButton, hasSelectedProduct);
         SetButtonState(nextDayButton, canUseDayControl);
+    }
+
+    private void UpdateStoreComputerButtonStates()
+    {
+        if (computerRoot == null || !computerRoot.gameObject.activeSelf)
+        {
+            return;
+        }
+
+        bool hasSelectedProduct = selectedProduct != null;
+        bool canPlaceShelf = GameManager.Instance == null || !GameManager.Instance.IsPlacingShelf;
+
+        SetButtonState(computerOrderStockButton, hasSelectedProduct);
+        SetButtonState(computerBuyShelfButton, canPlaceShelf);
+        UpdateComputerTexts();
+        UpdateComputerProductButtonVisuals();
+    }
+
+    private void UpdatePauseMenuButtonStates()
+    {
+        if (pauseMenuRoot == null || !pauseMenuRoot.gameObject.activeSelf)
+        {
+            return;
+        }
+
+        bool hasSave = GameManager.Instance != null && GameManager.Instance.HasSaveGame();
+        bool canSave = GameManager.Instance != null && GameManager.Instance.CanSaveGame;
+
+        SetButtonState(pauseResumeButton, true);
+        SetButtonState(pauseSaveButton, canSave);
+        SetButtonState(pauseLoadButton, hasSave);
+        SetButtonState(pauseSettingsButton, true);
+        SetButtonState(pauseMainMenuButton, false);
+        SetButtonState(pauseExitGameButton, true);
+        SetButtonState(pauseSettingsBackButton, true);
     }
 
     private void SetButtonState(Button button, bool isEnabled)
@@ -996,6 +1617,15 @@ public class BasicUIManager : MonoBehaviour
         }
 
         return null;
+    }
+
+    private bool GetPausePressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.Escape);
+#endif
     }
 
     private void CopyFontSettings(TMP_Text target)

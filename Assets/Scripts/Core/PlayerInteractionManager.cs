@@ -65,7 +65,7 @@ public class PlayerInteractionManager : MonoBehaviour
                 : "Take the empty box to the Baler";
         }
 
-        if (!TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox))
+        if (!TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out StoreComputer computer))
         {
             if (deliveryManager != null && deliveryManager.IsCarryingCrate)
             {
@@ -78,6 +78,14 @@ public class PlayerInteractionManager : MonoBehaviour
             }
 
             return string.Empty;
+        }
+
+        if (computer != null &&
+            !gameManager.IsCarryingRestockBox &&
+            !gameManager.IsCarryingEmptyBox &&
+            (deliveryManager == null || !deliveryManager.IsCarryingCrate))
+        {
+            return computer.GetPrompt();
         }
 
         if (crate != null &&
@@ -152,8 +160,17 @@ public class PlayerInteractionManager : MonoBehaviour
             return;
         }
 
-        if (TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox))
+        if (TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out StoreComputer computer))
         {
+            if (computer != null &&
+                !gameManager.IsCarryingRestockBox &&
+                !gameManager.IsCarryingEmptyBox &&
+                (deliveryManager == null || !deliveryManager.IsCarryingCrate))
+            {
+                computer.OpenComputer();
+                return;
+            }
+
             if (crate != null)
             {
                 deliveryManager?.HandleCrateClicked(crate);
@@ -181,19 +198,21 @@ public class PlayerInteractionManager : MonoBehaviour
 
     public Shelf GetFocusedShelf()
     {
-        return TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox) &&
+        return TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out StoreComputer computer) &&
                shelf != null &&
                crate == null &&
-               warehouseStockBox == null
+               warehouseStockBox == null &&
+               computer == null
             ? shelf
             : null;
     }
 
-    public bool TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox)
+    public bool TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out StoreComputer computer)
     {
         shelf = null;
         crate = null;
         warehouseStockBox = null;
+        computer = null;
 
         if (mainCamera == null)
         {
@@ -216,6 +235,12 @@ public class PlayerInteractionManager : MonoBehaviour
 
         foreach (RaycastHit hit in hits)
         {
+            computer = hit.collider.GetComponentInParent<StoreComputer>();
+            if (computer != null)
+            {
+                return true;
+            }
+
             crate = hit.collider.GetComponentInParent<DeliveryCrate>();
             if (crate != null)
             {

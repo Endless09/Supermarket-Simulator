@@ -82,6 +82,11 @@ public class FirstPersonPlayerController : MonoBehaviour
 
     private void Update()
     {
+        if (BasicUIManager.Instance != null && BasicUIManager.Instance.IsBlockingGameplayInput)
+        {
+            return;
+        }
+
         if (GetToggleViewPressed())
         {
             SetPlayerViewActive(!isPlayerViewActive);

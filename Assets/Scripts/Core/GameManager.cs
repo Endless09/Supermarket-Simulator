@@ -74,6 +74,7 @@ public class GameManager : MonoBehaviour
     private ShelfPlacementManager shelfPlacementManager;
     private WarehouseManager warehouseManager;
     private TrashManager trashManager;
+    private StoreComputer storeComputer;
     private DayNightCycle dayNightCycle;
     private bool isStateDirty;
     private bool nextDayCustomerWarningPending;
@@ -99,6 +100,7 @@ public class GameManager : MonoBehaviour
         EnsureDeliveryManager();
         EnsureWarehouseManager();
         EnsureTrashManager();
+        EnsureStoreComputer();
         EnsureStoreNavigation();
 
         BuildStartingInventory();
@@ -1407,6 +1409,21 @@ public class GameManager : MonoBehaviour
         }
 
         trashManager.Initialize(this);
+    }
+
+    private void EnsureStoreComputer()
+    {
+        if (storeComputer != null)
+        {
+            return;
+        }
+
+        storeComputer = FindAnyObjectByType<StoreComputer>();
+        if (storeComputer == null)
+        {
+            GameObject computerObject = new GameObject("StoreComputer");
+            storeComputer = computerObject.AddComponent<StoreComputer>();
+        }
     }
 
     private void EnsureStoreNavigation()
