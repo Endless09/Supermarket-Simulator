@@ -55,7 +55,9 @@ public class GameManager : MonoBehaviour
     private const string CustomersStillInsideWarning = "Customers are still inside. Press Next Day again to continue anyway.";
 
     public int CurrentDay { get; private set; }
-    public bool IsPlacingShelf => shelfPlacementManager != null && shelfPlacementManager.IsPlacingShelf;
+    public bool IsPlacingShelf => (shelfPlacementManager != null && shelfPlacementManager.IsPlacingShelf) ||
+                                  (warehouseManager != null && warehouseManager.IsPlacingWarehouseShelf);
+    public bool IsPlacingWarehouseShelf => warehouseManager != null && warehouseManager.IsPlacingWarehouseShelf;
     public bool IsMovingShelf => shelfPlacementManager != null && shelfPlacementManager.IsMovingShelf;
 
     private MoneyManager moneyManager;
@@ -104,6 +106,7 @@ public class GameManager : MonoBehaviour
         EnsureStoreNavigation();
 
         BuildStartingInventory();
+        MigrateBackroomInventoryToWarehouseShelves();
         RegisterKnownProductsFromInitialData();
     }
 
@@ -176,18 +179,38 @@ public class GameManager : MonoBehaviour
 
         EnsureShelfPlacementManager();
         shelfPlacementManager?.HandleUpdate();
+        EnsureWarehouseManager();
+        warehouseManager?.HandleUpdate();
     }
 
     public void StartShelfPlacement()
     {
+        if (warehouseManager != null && warehouseManager.IsPlacingWarehouseShelf)
+        {
+            return;
+        }
+
         EnsureShelfPlacementManager();
         shelfPlacementManager?.StartShelfPlacement(moneyManager);
+    }
+
+    public void StartWarehouseShelfPlacement()
+    {
+        if (shelfPlacementManager != null && shelfPlacementManager.IsPlacingShelf)
+        {
+            return;
+        }
+
+        EnsureWarehouseManager();
+        warehouseManager?.StartWarehouseShelfPlacement(moneyManager);
     }
 
     public void CancelShelfPlacement()
     {
         EnsureShelfPlacementManager();
         shelfPlacementManager?.CancelShelfPlacement();
+        EnsureWarehouseManager();
+        warehouseManager?.CancelWarehouseShelfPlacement();
     }
 
     public bool StartMovingShelf(Shelf shelf)
@@ -261,30 +284,24 @@ public class GameManager : MonoBehaviour
             return 0;
         }
 
-        if (backroomInventory.TryGetValue(product, out int amount))
+        int physicalStock = 0;
+        EnsureWarehouseManager();
+        if (warehouseManager != null)
         {
-            return amount;
+            physicalStock = warehouseManager.GetStoredAmount(product);
         }
 
-        return 0;
+        if (backroomInventory.TryGetValue(product, out int amount))
+        {
+            return physicalStock + amount;
+        }
+
+        return physicalStock;
     }
 
     public bool TakeFromBackroom(ProductData product, int amount)
     {
-        if (product == null || amount <= 0)
-        {
-            return false;
-        }
-
-        int currentAmount = GetBackroomStock(product);
-        if (currentAmount < amount)
-        {
-            return false;
-        }
-
-        backroomInventory[product] = currentAmount - amount;
-        RefreshWarehouseStockBoxes();
-        return true;
+        return false;
     }
 
     public bool BuyProductStock(ProductData product, int amount)
@@ -324,7 +341,6 @@ public class GameManager : MonoBehaviour
         }
 
         backroomInventory[product] += amount;
-        RefreshWarehouseStockBoxes();
     }
 
     public void SetDefaultShelfProduct(ProductData product)
@@ -400,6 +416,7 @@ public class GameManager : MonoBehaviour
     public bool IsCarryingRestockBox => carriedRestockBox != null;
     public bool IsCarryingEmptyBox => carriedEmptyBox != null;
     public ProductData CarriedRestockProduct => carriedRestockBox != null ? carriedRestockBox.Product : null;
+    public int CarriedRestockAmount => carriedRestockBox != null ? carriedRestockBox.Amount : 0;
     public MoneyManager MoneyManager => moneyManager;
     public DeliveryManager DeliveryManager => deliveryManager;
     public WarehouseManager WarehouseManager => warehouseManager;
@@ -440,13 +457,15 @@ public class GameManager : MonoBehaviour
 
         if (IsPlacingShelf)
         {
-            return "Placing new shelf\nLeft click on the floor to place it, or right click to cancel.";
+            return warehouseManager != null && warehouseManager.IsPlacingWarehouseShelf
+                ? "Placing warehouse shelf\nLeft click on the floor to place it, or right click to cancel."
+                : "Placing new shelf\nLeft click on the floor to place it, or right click to cancel.";
         }
 
         if (carriedRestockBox != null && carriedRestockBox.Product != null)
         {
             return "Carrying stock: " + carriedRestockBox.Product.productName + " x" + carriedRestockBox.Amount +
-                   "\nClick the matching shelf to restock it";
+                   "\nStock a store shelf or return it to warehouse storage";
         }
 
         if (carriedEmptyBox != null)
@@ -472,14 +491,8 @@ public class GameManager : MonoBehaviour
 
     public bool PrepareRestockForShelf(Shelf shelf)
     {
-        EnsureDeliveryManager();
-        if (shelf == null || shelf.AssignedProduct == null || IsPlacingShelf || (deliveryManager != null && deliveryManager.IsCarryingCrate) || carriedRestockBox != null)
-        {
-            return false;
-        }
-
-        EnsureWarehouseManager();
-        return warehouseManager != null && warehouseManager.TryPrepareRestockForShelf(shelf, mainCamera);
+        Debug.Log("Automatic restock preparation is disabled. Pick up a box from a warehouse shelf manually.");
+        return false;
     }
 
     public Shelf GetFocusedShelf()
@@ -567,26 +580,23 @@ public class GameManager : MonoBehaviour
 
     private void RefreshWarehouseStockBoxes()
     {
-        EnsureWarehouseManager();
-        if (warehouseManager != null)
-        {
-            warehouseManager.RefreshStockBoxes();
-        }
+        MigrateBackroomInventoryToWarehouseShelves();
     }
 
-    public void HandleWarehouseStockBoxClicked(WarehouseStockBox stockBox)
+    private void MigrateBackroomInventoryToWarehouseShelves()
     {
-        EnsureDeliveryManager();
-        if (stockBox == null || IsPlacingShelf || (deliveryManager != null && deliveryManager.IsCarryingCrate) || carriedRestockBox != null || carriedEmptyBox != null)
+        if (backroomInventory.Count == 0)
         {
             return;
         }
 
         EnsureWarehouseManager();
-        if (warehouseManager != null)
-        {
-            warehouseManager.HandleStockBoxClicked(stockBox);
-        }
+        warehouseManager?.MigrateLegacyBackroomInventory(backroomInventory);
+    }
+
+    public void HandleWarehouseStockBoxClicked(WarehouseStockBox stockBox)
+    {
+        Debug.Log("Legacy warehouse stock boxes are no longer used. Place crates into warehouse shelf slots.");
     }
 
     public void HandleDeliveryCrateClicked(DeliveryCrate crate)
@@ -596,6 +606,36 @@ public class GameManager : MonoBehaviour
         {
             deliveryManager.HandleCrateClicked(crate);
         }
+    }
+
+    public void HandleWarehouseShelfClicked(WarehouseShelf shelf)
+    {
+        EnsureDeliveryManager();
+        EnsureWarehouseManager();
+        if (shelf == null || IsPlacingShelf || carriedEmptyBox != null || warehouseManager == null)
+        {
+            return;
+        }
+
+        if (deliveryManager != null && deliveryManager.IsCarryingCrate)
+        {
+            deliveryManager.TryPlaceCarriedCrateOnWarehouseShelf(shelf);
+            return;
+        }
+
+        if (carriedRestockBox != null)
+        {
+            TryReturnCarriedRestockBoxToWarehouseShelf(shelf);
+            return;
+        }
+
+        warehouseManager.TryPickUpBoxFromShelf(shelf, GetSelectedOrFocusedShelf());
+    }
+
+    public bool TryPlaceBoxOnWarehouseShelf(WarehouseShelf shelf, ProductData product, int amount)
+    {
+        EnsureWarehouseManager();
+        return warehouseManager != null && warehouseManager.TryPlaceBoxOnShelf(shelf, product, amount);
     }
 
     public void HandleShelfClicked(Shelf shelf)
@@ -620,10 +660,7 @@ public class GameManager : MonoBehaviour
         EnsureDeliveryManager();
         if (deliveryManager != null && deliveryManager.IsCarryingCrate)
         {
-            if (deliveryManager.TryApplyCarriedCrateToShelf(shelf))
-            {
-                return;
-            }
+            return;
         }
     }
 
@@ -633,11 +670,11 @@ public class GameManager : MonoBehaviour
         playerInteractionManager?.HandlePlayerViewInteraction();
     }
 
-    private void SpawnRestockBox(ProductData product, int amount, Vector3 position, bool carried)
+    private RestockBox SpawnRestockBox(ProductData product, int amount, Vector3 position, bool carried)
     {
         if (product == null || amount <= 0)
         {
-            return;
+            return null;
         }
 
         EnsureBackroomZoneVisual();
@@ -655,6 +692,13 @@ public class GameManager : MonoBehaviour
         {
             carriedRestockBox = restockBox;
         }
+
+        return restockBox;
+    }
+
+    public void SpawnCarriedWarehouseBox(ProductData product, int amount, Vector3 position)
+    {
+        SpawnRestockBox(product, amount, position, true);
     }
 
     private void UpdateCarriedRestockBoxPosition()
@@ -680,20 +724,40 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        int carriedAmount = carriedRestockBox.Amount;
-        int addedAmount = shelf.AddStock(carriedProduct, carriedAmount);
+        int addedAmount = shelf.AddStock(carriedProduct, carriedRestockBox.Amount);
         int leftoverAmount = carriedRestockBox.Amount - addedAmount;
+
+        if (leftoverAmount > 0)
+        {
+            carriedRestockBox.SetAmount(leftoverAmount);
+            NotifyStateChanged();
+            return;
+        }
 
         activeRestockBoxes.Remove(carriedRestockBox);
         Destroy(carriedRestockBox.gameObject);
         carriedRestockBox = null;
+        CreateCarriedEmptyBox(carriedProduct);
+        NotifyStateChanged();
+    }
 
-        if (leftoverAmount > 0)
+    private void TryReturnCarriedRestockBoxToWarehouseShelf(WarehouseShelf shelf)
+    {
+        if (carriedRestockBox == null || shelf == null)
         {
-            AddToBackroom(carriedProduct, leftoverAmount);
+            return;
         }
 
-        CreateCarriedEmptyBox(carriedProduct);
+        EnsureWarehouseManager();
+        if (warehouseManager == null ||
+            !warehouseManager.TryReturnWarehouseBoxToShelf(shelf, carriedRestockBox.Product, carriedRestockBox.Amount))
+        {
+            return;
+        }
+
+        activeRestockBoxes.Remove(carriedRestockBox);
+        Destroy(carriedRestockBox.gameObject);
+        carriedRestockBox = null;
         NotifyStateChanged();
     }
 
@@ -704,7 +768,14 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        AddToBackroom(carriedRestockBox.Product, carriedRestockBox.Amount);
+        EnsureWarehouseManager();
+        if (warehouseManager == null ||
+            !warehouseManager.TryReturnWarehouseBox(carriedRestockBox.Product, carriedRestockBox.Amount))
+        {
+            Debug.Log("No compatible warehouse shelf slot is available for this box.");
+            return;
+        }
+
         activeRestockBoxes.Remove(carriedRestockBox);
         Destroy(carriedRestockBox.gameObject);
         carriedRestockBox = null;
@@ -779,7 +850,17 @@ public class GameManager : MonoBehaviour
     public void PlacePendingShelfFromCurrentPointer()
     {
         EnsureShelfPlacementManager();
-        shelfPlacementManager?.TryPlaceShelfFromCurrentPointer();
+        if (shelfPlacementManager != null && shelfPlacementManager.IsPlacingShelf)
+        {
+            shelfPlacementManager.TryPlaceShelfFromCurrentPointer();
+            return;
+        }
+
+        EnsureWarehouseManager();
+        if (warehouseManager != null && warehouseManager.IsPlacingWarehouseShelf)
+        {
+            warehouseManager.TryPlaceWarehouseShelfFromCurrentPointer();
+        }
     }
 
     public Shelf GetSelectedOrFocusedShelf()
@@ -964,8 +1045,10 @@ public class GameManager : MonoBehaviour
                 deliveryManager.ClearState();
             }
             ClearRestockBoxes();
+            EnsureWarehouseManager();
+            warehouseManager?.ClearWarehouseShelves();
             BuildStartingInventory();
-            RefreshWarehouseStockBoxes();
+            MigrateBackroomInventoryToWarehouseShelves();
             CurrentDay = startingDay;
             EnsureDayNightCycle();
             dayNightCycle?.ResetToOpeningTime();
@@ -1012,6 +1095,8 @@ public class GameManager : MonoBehaviour
             isStoreOpen = dayNightCycle == null || dayNightCycle.IsStoreOpen
         };
 
+        MigrateBackroomInventoryToWarehouseShelves();
+
         foreach (KeyValuePair<ProductData, int> entry in backroomInventory)
         {
             if (entry.Key == null)
@@ -1024,6 +1109,12 @@ public class GameManager : MonoBehaviour
                 productName = entry.Key.productName,
                 amount = entry.Value
             });
+        }
+
+        EnsureWarehouseManager();
+        if (warehouseManager != null)
+        {
+            saveData.warehouseShelves = warehouseManager.BuildWarehouseShelfStates();
         }
 
         Shelf[] shelves = FindObjectsByType<Shelf>();
@@ -1083,6 +1174,8 @@ public class GameManager : MonoBehaviour
                 deliveryManager.ClearState();
             }
             ClearRestockBoxes();
+            EnsureWarehouseManager();
+            warehouseManager?.ClearWarehouseShelves();
             CurrentDay = Mathf.Max(1, saveData.currentDay);
             EnsureDayNightCycle();
             if (dayNightCycle != null)
@@ -1156,6 +1249,36 @@ public class GameManager : MonoBehaviour
                 SpawnRestockBox(product, boxEntry.amount, boxEntry.position, boxEntry.isCarried);
             }
 
+            if (warehouseManager != null && saveData.warehouseShelves != null)
+            {
+                foreach (WarehouseShelfSaveEntry warehouseShelfEntry in saveData.warehouseShelves)
+                {
+                    ProductData productLock = ResolveProductByName(warehouseShelfEntry.lockedProductName);
+                    List<WarehouseShelfSlotRuntimeState> loadedSlots = new List<WarehouseShelfSlotRuntimeState>();
+
+                    if (warehouseShelfEntry.slots != null)
+                    {
+                        foreach (WarehouseShelfSlotSaveEntry slotEntry in warehouseShelfEntry.slots)
+                        {
+                            ProductData product = ResolveProductByName(slotEntry.productName);
+                            if (product == null || slotEntry.amount <= 0)
+                            {
+                                continue;
+                            }
+
+                            loadedSlots.Add(new WarehouseShelfSlotRuntimeState
+                            {
+                                slotIndex = slotEntry.slotIndex,
+                                product = product,
+                                amount = slotEntry.amount
+                            });
+                        }
+                    }
+
+                    warehouseManager.SpawnLoadedWarehouseShelf(warehouseShelfEntry.position, productLock, loadedSlots);
+                }
+            }
+
             Shelf[] existingShelves = FindObjectsByType<Shelf>();
             foreach (Shelf shelf in existingShelves)
             {
@@ -1179,7 +1302,7 @@ public class GameManager : MonoBehaviour
                 BasicUIManager.Instance.SyncSelectedProduct(defaultShelfProduct);
             }
 
-            RefreshWarehouseStockBoxes();
+            MigrateBackroomInventoryToWarehouseShelves();
         }
         finally
         {
@@ -1392,7 +1515,7 @@ public class GameManager : MonoBehaviour
             warehouseManager = gameObject.AddComponent<WarehouseManager>();
         }
 
-        warehouseManager.Initialize(this);
+        warehouseManager.Initialize(this, mainCamera, floorLayer);
     }
 
     private void EnsureTrashManager()

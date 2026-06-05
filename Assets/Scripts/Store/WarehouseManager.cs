@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 /// <summary>
-/// Owns the warehouse/backroom area visuals and stock-box interaction rules.
+/// Owns the warehouse room, purchasable warehouse shelf placement, and physical boxed stock.
 /// </summary>
 public class WarehouseManager : MonoBehaviour
 {
@@ -18,32 +21,39 @@ public class WarehouseManager : MonoBehaviour
     [SerializeField] private Vector3 warehouseZoneCenter = new Vector3(-7f, 0f, 8f);
     [SerializeField] private Vector3 warehouseZoneSize = new Vector3(10f, 3.2f, 6f);
     [SerializeField] private Color warehouseWallColor = new Color(0.78f, 0.8f, 0.84f, 1f);
-    [SerializeField] private Color warehouseRackColor = new Color(0.45f, 0.49f, 0.55f, 1f);
 
-    private readonly List<WarehouseStockBox> activeWarehouseStockBoxes = new List<WarehouseStockBox>();
-    private readonly Dictionary<string, int> reservedSlotByProductName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-    private readonly Vector3[] warehouseStockLocalSlots =
-    {
-        new Vector3(-2.3f, 0.82f, 1.02f),
-        new Vector3(-2.3f, 1.52f, 1.02f),
-        new Vector3(-2.3f, 2.22f, 1.02f),
-        new Vector3(0f, 0.82f, 1.02f),
-        new Vector3(0f, 1.52f, 1.02f),
-        new Vector3(0f, 2.22f, 1.02f),
-        new Vector3(2.3f, 0.82f, 1.02f),
-        new Vector3(2.3f, 1.52f, 1.02f),
-        new Vector3(2.3f, 2.22f, 1.02f)
-    };
+    [Header("Warehouse Shelves")]
+    [SerializeField] private GameObject warehouseShelfVisualPrefab;
+    [SerializeField] private float warehouseShelfBuyCost = 100f;
+    [SerializeField] private Color warehouseShelfPreviewColor = new Color(0.35f, 1f, 0.85f, 0.75f);
+    [SerializeField] private Color invalidWarehouseShelfPreviewColor = new Color(1f, 0.2f, 0.16f, 0.75f);
+    [SerializeField] private bool snapWarehouseShelvesToGrid = true;
+    [SerializeField] private float warehouseShelfGridSize = 1f;
+    [SerializeField] private Vector3 warehouseShelfGridOrigin = Vector3.zero;
+    [SerializeField] private Vector3 firstMigrationShelfPosition = new Vector3(-9.4f, 0f, 8.6f);
+    [SerializeField] private Vector3 migrationShelfSpacing = new Vector3(1.6f, 0f, 0f);
+
+    private readonly List<WarehouseShelf> warehouseShelves = new List<WarehouseShelf>();
 
     private GameManager gameManager;
+    private Camera mainCamera;
+    private LayerMask floorLayer;
     private Transform backroomZoneRoot;
-    private Collider backroomZoneCollider;
+    private bool isPlacingWarehouseShelf;
+    private bool hasUnplacedWarehouseShelfPurchase;
+    private bool waitingForPlacementClickRelease;
+    private WarehouseShelf warehouseShelfPreview;
+    private MeshRenderer[] previewRenderers;
 
     public Vector3 BackroomDropOffPosition => backroomDropOffPosition;
+    public bool IsPlacingWarehouseShelf => isPlacingWarehouseShelf;
 
-    public void Initialize(GameManager owner)
+    public void Initialize(GameManager owner, Camera camera, LayerMask floorLayerValue)
     {
         gameManager = owner;
+        mainCamera = camera;
+        floorLayer = floorLayerValue;
+        ResolveDefaultVisualPrefab();
         EnsureVisual();
     }
 
@@ -61,53 +71,181 @@ public class WarehouseManager : MonoBehaviour
 
         CreateWarehouseFloorPad();
         CreateWarehouseWalls();
-        CreateWarehouseRacks();
-        CreateWarehouseStockBoxes();
-
-        GameObject zoneObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        zoneObject.name = "BackroomStoragePad";
-        zoneObject.transform.SetParent(backroomZoneRoot, false);
-        zoneObject.transform.localPosition = new Vector3(backroomDropOffPosition.x - warehouseZoneCenter.x,
-                                                         -backroomDropOffPosition.y + (backroomZoneSize.y * 0.5f),
-                                                         backroomDropOffPosition.z - warehouseZoneCenter.z);
-        zoneObject.transform.localScale = backroomZoneSize;
-        backroomZoneCollider = zoneObject.GetComponent<Collider>();
-
-        MeshRenderer zoneRenderer = zoneObject.GetComponent<MeshRenderer>();
-        if (zoneRenderer != null)
-        {
-            Material zoneMaterial = gameManager.CreateRuntimeMaterial(backroomZoneColor);
-            zoneRenderer.material = zoneMaterial;
-            zoneRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            zoneRenderer.receiveShadows = false;
-        }
-
-        GameObject labelObject = new GameObject("BackroomStorageLabel");
-        labelObject.transform.SetParent(backroomZoneRoot, false);
-        labelObject.transform.localPosition = new Vector3(backroomDropOffPosition.x - warehouseZoneCenter.x,
-                                                          backroomZoneLabelOffset.y,
-                                                          backroomDropOffPosition.z - warehouseZoneCenter.z + backroomZoneLabelOffset.z);
-
-        TextMeshPro label = labelObject.AddComponent<TextMeshPro>();
-        label.text = "BACKROOM STORAGE\nBulk Stock Drop";
-        label.fontSize = 4f;
-        label.alignment = TextAlignmentOptions.Center;
-        label.color = Color.white;
-        label.outlineColor = new Color(0f, 0f, 0f, 0.7f);
-        label.outlineWidth = 0.15f;
-        labelObject.AddComponent<BillboardToCamera>();
-
+        CreateBackroomDropPad();
         UpdateBackroomZoneTransform();
     }
 
-    public void RefreshStockBoxes()
+    public void HandleUpdate()
     {
-        if (backroomZoneRoot == null)
+        if (!isPlacingWarehouseShelf)
         {
             return;
         }
 
-        SyncWarehouseStockBoxes();
+        if (waitingForPlacementClickRelease)
+        {
+            UpdateWarehouseShelfPreviewPosition();
+
+            if (!gameManager.IsLeftMouseButtonHeld())
+            {
+                waitingForPlacementClickRelease = false;
+            }
+
+            return;
+        }
+
+        UpdateWarehouseShelfPreviewPosition();
+
+        if (gameManager.GetLeftMouseButtonDown())
+        {
+            TryPlaceWarehouseShelfFromMouse();
+        }
+
+        if (gameManager.GetRightMouseButtonDown())
+        {
+            CancelWarehouseShelfPlacement();
+        }
+    }
+
+    public void StartWarehouseShelfPlacement(MoneyManager moneyManager)
+    {
+        if (isPlacingWarehouseShelf)
+        {
+            return;
+        }
+
+        if (moneyManager == null)
+        {
+            Debug.LogWarning("MoneyManager not found in the scene.");
+            return;
+        }
+
+        if (!moneyManager.SpendMoney(warehouseShelfBuyCost))
+        {
+            Debug.Log("Not enough money to buy a warehouse shelf.");
+            return;
+        }
+
+        isPlacingWarehouseShelf = true;
+        hasUnplacedWarehouseShelfPurchase = true;
+        waitingForPlacementClickRelease = gameManager.IsLeftMouseButtonHeld();
+        CreateWarehouseShelfPreview();
+        Debug.Log("Warehouse shelf purchased. Left click on the floor to place it. Right click to cancel.");
+    }
+
+    public void CancelWarehouseShelfPlacement()
+    {
+        MoneyManager moneyManager = gameManager != null ? gameManager.MoneyManager : null;
+        if (isPlacingWarehouseShelf && hasUnplacedWarehouseShelfPurchase && moneyManager != null)
+        {
+            moneyManager.AddMoney(warehouseShelfBuyCost);
+        }
+
+        isPlacingWarehouseShelf = false;
+        hasUnplacedWarehouseShelfPurchase = false;
+        waitingForPlacementClickRelease = false;
+        DestroyWarehouseShelfPreview();
+    }
+
+    public void TryPlaceWarehouseShelfFromCurrentPointer()
+    {
+        TryPlaceWarehouseShelfFromMouse();
+    }
+
+    public int GetStoredAmount(ProductData product)
+    {
+        if (product == null)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        foreach (WarehouseShelf shelf in GetLiveWarehouseShelves())
+        {
+            total += shelf.GetStoredAmount(product);
+        }
+
+        return total;
+    }
+
+    public bool TryPlaceBoxOnShelf(WarehouseShelf shelf, ProductData product, int amount)
+    {
+        if (shelf == null || product == null || amount <= 0)
+        {
+            return false;
+        }
+
+        bool placed = shelf.TryAddBox(product, amount);
+        if (placed)
+        {
+            gameManager.RegisterKnownProduct(product);
+            gameManager.NotifyStateChanged();
+        }
+
+        return placed;
+    }
+
+    public bool TryPickUpBoxFromShelf(WarehouseShelf shelf, Shelf targetShelf)
+    {
+        if (shelf == null)
+        {
+            return false;
+        }
+
+        ProductData preferredProduct = targetShelf != null ? targetShelf.AssignedProduct : null;
+        if (!shelf.TryRemoveBox(preferredProduct, out ProductData product, out int amount))
+        {
+            if (shelf.TryClearProductLock())
+            {
+                gameManager.NotifyStateChanged();
+                return true;
+            }
+
+            return false;
+        }
+
+        gameManager.SpawnCarriedWarehouseBox(product, amount, shelf.transform.position + Vector3.up * 0.75f);
+        gameManager.NotifyStateChanged();
+        return true;
+    }
+
+    public bool TryReturnWarehouseBox(ProductData product, int amount)
+    {
+        if (product == null || amount <= 0)
+        {
+            return false;
+        }
+
+        foreach (WarehouseShelf shelf in GetLiveWarehouseShelves())
+        {
+            if (shelf.TryAddBox(product, amount))
+            {
+                gameManager.NotifyStateChanged();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool TryReturnWarehouseBoxToShelf(WarehouseShelf shelf, ProductData product, int amount)
+    {
+        return TryPlaceBoxOnShelf(shelf, product, amount);
+    }
+
+    public string GetPrompt(WarehouseShelf shelf, ProductData carriedProduct, bool isCarryingWarehouseBox, Shelf targetShelf, Camera camera)
+    {
+        if (shelf == null)
+        {
+            return string.Empty;
+        }
+
+        if (!IsPlayerInsideWarehouse(camera))
+        {
+            return "Go into the warehouse to use storage shelves";
+        }
+
+        return shelf.GetPrompt(carriedProduct, isCarryingWarehouseBox, targetShelf);
     }
 
     public bool IsPointInsideDropZone(Vector3 worldPoint)
@@ -122,14 +260,14 @@ public class WarehouseManager : MonoBehaviour
                worldPoint.z <= zoneCenter.z + halfDepth;
     }
 
-    public bool IsPlayerInsideWarehouse(Camera mainCamera)
+    public bool IsPlayerInsideWarehouse(Camera camera)
     {
-        if (mainCamera == null)
+        if (camera == null)
         {
             return false;
         }
 
-        Vector3 position = mainCamera.transform.position;
+        Vector3 position = camera.transform.position;
         Vector3 relative = position - warehouseZoneCenter;
         float halfWidth = warehouseZoneSize.x * 0.5f;
         float halfDepth = warehouseZoneSize.z * 0.5f;
@@ -140,175 +278,341 @@ public class WarehouseManager : MonoBehaviour
                relative.z <= halfDepth;
     }
 
-    public string GetPrompt(WarehouseStockBox stockBox, Shelf targetShelf, Camera mainCamera)
+    public void ClearWarehouseShelves()
     {
-        if (stockBox == null)
+        foreach (WarehouseShelf shelf in GetLiveWarehouseShelves())
         {
-            return string.Empty;
+            if (shelf != null)
+            {
+                Destroy(shelf.gameObject);
+            }
         }
 
-        if (!IsPlayerInsideWarehouse(mainCamera))
-        {
-            return "Go into the warehouse to grab stock";
-        }
-
-        if (targetShelf != null && targetShelf.CanAcceptProduct(stockBox.Product))
-        {
-            return "[E] Grab stock box for " + stockBox.Product.productName;
-        }
-
-        return "[E] Grab " + stockBox.Product.productName + " stock box";
+        warehouseShelves.Clear();
+        DestroyWarehouseShelfPreview();
+        isPlacingWarehouseShelf = false;
+        hasUnplacedWarehouseShelfPurchase = false;
+        waitingForPlacementClickRelease = false;
     }
 
-    public bool TryPrepareRestockForShelf(Shelf shelf, Camera mainCamera)
+    public WarehouseShelf SpawnLoadedWarehouseShelf(Vector3 worldPosition, ProductData productLock, List<WarehouseShelfSlotRuntimeState> loadedSlots)
     {
-        if (shelf == null || shelf.AssignedProduct == null || !IsPlayerInsideWarehouse(mainCamera))
-        {
-            return false;
-        }
-
-        WarehouseStockBox stockBox = FindStockBox(shelf.AssignedProduct);
-        return gameManager.TryPickUpWarehouseStockForShelf(stockBox, shelf);
+        WarehouseShelf shelf = CreateWarehouseShelf(worldPosition);
+        shelf.LoadState(productLock, loadedSlots);
+        return shelf;
     }
 
-    public void HandleStockBoxClicked(WarehouseStockBox stockBox)
+    public List<WarehouseShelfSaveEntry> BuildWarehouseShelfStates()
     {
-        if (stockBox == null)
+        List<WarehouseShelfSaveEntry> states = new List<WarehouseShelfSaveEntry>();
+        foreach (WarehouseShelf shelf in GetLiveWarehouseShelves())
+        {
+            states.Add(shelf.BuildSaveEntry());
+        }
+
+        return states;
+    }
+
+    public void MigrateLegacyBackroomInventory(Dictionary<ProductData, int> inventory)
+    {
+        if (inventory == null || inventory.Count == 0)
         {
             return;
         }
 
-        Shelf targetShelf = gameManager.GetSelectedOrFocusedShelf();
-        if (targetShelf != null && !targetShelf.CanAcceptProduct(stockBox.Product))
+        foreach (KeyValuePair<ProductData, int> entry in inventory)
         {
-            targetShelf = null;
+            if (entry.Key == null || entry.Value <= 0)
+            {
+                continue;
+            }
+
+            WarehouseShelf shelf = FindCompatibleShelfWithSpace(entry.Key);
+            if (shelf == null)
+            {
+                shelf = CreateWarehouseShelf(GetNextMigrationShelfPosition());
+            }
+
+            shelf.TryAddBox(entry.Key, entry.Value);
         }
 
-        gameManager.TryPickUpWarehouseStockForShelf(stockBox, targetShelf);
+        inventory.Clear();
     }
 
-    public WarehouseStockBox FindStockBox(ProductData product)
+    private WarehouseShelf FindCompatibleShelfWithSpace(ProductData product)
     {
-        if (product == null)
+        foreach (WarehouseShelf shelf in GetLiveWarehouseShelves())
         {
-            return null;
-        }
-
-        foreach (WarehouseStockBox stockBox in activeWarehouseStockBoxes)
-        {
-            if (stockBox != null && stockBox.Product == product)
+            if (shelf.CanAcceptProduct(product))
             {
-                return stockBox;
+                return shelf;
             }
         }
 
         return null;
     }
 
-    private void CreateWarehouseStockBoxes()
+    private List<WarehouseShelf> GetLiveWarehouseShelves()
     {
-        SyncWarehouseStockBoxes();
-    }
+        warehouseShelves.RemoveAll(shelf => shelf == null);
 
-    private void ClearWarehouseStockBoxes()
-    {
-        foreach (WarehouseStockBox stockBox in activeWarehouseStockBoxes)
+        WarehouseShelf[] sceneShelves = FindObjectsByType<WarehouseShelf>();
+        foreach (WarehouseShelf shelf in sceneShelves)
         {
-            if (stockBox != null)
+            if (shelf != null && !warehouseShelves.Contains(shelf))
             {
-                Destroy(stockBox.gameObject);
+                warehouseShelves.Add(shelf);
             }
         }
 
-        activeWarehouseStockBoxes.Clear();
+        return warehouseShelves;
     }
 
-    private void SyncWarehouseStockBoxes()
+    private Vector3 GetNextMigrationShelfPosition()
     {
-        activeWarehouseStockBoxes.RemoveAll(stockBox => stockBox == null);
+        int index = GetLiveWarehouseShelves().Count;
+        int column = index % 5;
+        int row = index / 5;
+        return firstMigrationShelfPosition +
+               new Vector3(migrationShelfSpacing.x * column, migrationShelfSpacing.y * row, migrationShelfSpacing.z * row);
+    }
 
-        List<ProductData> productsToDisplay = GetProductsForReservedSlots();
-        AssignReservedSlots(productsToDisplay);
-        int targetCount = Mathf.Min(reservedSlotByProductName.Count, warehouseStockLocalSlots.Length);
-
-        while (activeWarehouseStockBoxes.Count < targetCount)
+    private void TryPlaceWarehouseShelfFromMouse()
+    {
+        if (TryGetPlacementPosition(out Vector3 placementPosition))
         {
-            activeWarehouseStockBoxes.Add(CreateWarehouseStockBoxObject());
+            PlaceWarehouseShelfAtPosition(placementPosition);
+        }
+    }
+
+    private bool TryGetPlacementPosition(out Vector3 placementPosition)
+    {
+        placementPosition = Vector3.zero;
+
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
         }
 
-        while (activeWarehouseStockBoxes.Count > targetCount)
+        if (mainCamera == null)
         {
-            int lastIndex = activeWarehouseStockBoxes.Count - 1;
-            WarehouseStockBox extraBox = activeWarehouseStockBoxes[lastIndex];
-            activeWarehouseStockBoxes.RemoveAt(lastIndex);
+            return false;
+        }
 
-            if (extraBox != null)
+        Vector3 mousePosition = gameManager.GetMouseScreenPosition();
+        Ray ray = mainCamera.ScreenPointToRay(mousePosition);
+
+        bool hitFloor = Physics.Raycast(ray, out RaycastHit hit, 100f, floorLayer);
+        if (!hitFloor)
+        {
+            hitFloor = Physics.Raycast(ray, out hit, 100f);
+        }
+
+        if (hitFloor)
+        {
+            placementPosition = hit.point;
+            return true;
+        }
+
+        Plane groundPlane = new Plane(Vector3.up, Vector3.zero);
+        if (groundPlane.Raycast(ray, out float enter))
+        {
+            placementPosition = ray.GetPoint(enter);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void PlaceWarehouseShelfAtPosition(Vector3 worldPosition)
+    {
+        Vector3 spawnPosition = GetWarehouseShelfPlacementGroundPosition(worldPosition);
+
+        if (!IsPlacementPositionValid(spawnPosition))
+        {
+            Debug.Log("Cannot place warehouse shelf here. Move it away from shelves, walls, customers, checkout, or warehouse racks.");
+            return;
+        }
+
+        CreateWarehouseShelf(spawnPosition);
+        isPlacingWarehouseShelf = false;
+        hasUnplacedWarehouseShelfPurchase = false;
+        waitingForPlacementClickRelease = false;
+        DestroyWarehouseShelfPreview();
+        gameManager.QueueStoreNavigationRebuild();
+        gameManager.NotifyStateChanged();
+    }
+
+    private WarehouseShelf CreateWarehouseShelf(Vector3 worldPosition)
+    {
+        GameObject shelfObject = new GameObject("WarehouseShelf");
+        shelfObject.transform.position = worldPosition;
+
+        WarehouseShelf shelf = shelfObject.AddComponent<WarehouseShelf>();
+        shelf.Initialize(gameManager, warehouseShelfVisualPrefab);
+        warehouseShelves.Add(shelf);
+        return shelf;
+    }
+
+    private void UpdateWarehouseShelfPreviewPosition()
+    {
+        if (!isPlacingWarehouseShelf || warehouseShelfPreview == null)
+        {
+            return;
+        }
+
+        if (TryGetPlacementPosition(out Vector3 placementPosition))
+        {
+            Vector3 previewPosition = GetWarehouseShelfPlacementGroundPosition(placementPosition);
+            warehouseShelfPreview.transform.position = previewPosition;
+            bool isValid = IsPlacementPositionValid(previewPosition);
+            ApplyPreviewColor(isValid);
+
+            if (!warehouseShelfPreview.gameObject.activeSelf)
             {
-                Destroy(extraBox.gameObject);
+                warehouseShelfPreview.gameObject.SetActive(true);
             }
         }
-
-        foreach (ProductData product in productsToDisplay)
+        else if (warehouseShelfPreview.gameObject.activeSelf)
         {
-            if (product == null ||
-                !reservedSlotByProductName.TryGetValue(product.productName, out int slotIndex) ||
-                slotIndex < 0 ||
-                slotIndex >= activeWarehouseStockBoxes.Count ||
-                slotIndex >= warehouseStockLocalSlots.Length)
+            warehouseShelfPreview.gameObject.SetActive(false);
+        }
+    }
+
+    private Vector3 GetWarehouseShelfPlacementGroundPosition(Vector3 worldPosition)
+    {
+        if (!snapWarehouseShelvesToGrid || warehouseShelfGridSize <= 0.01f)
+        {
+            return worldPosition;
+        }
+
+        Vector3 snappedPosition = worldPosition;
+        snappedPosition.x = SnapCoordinate(worldPosition.x, warehouseShelfGridOrigin.x, warehouseShelfGridSize);
+        snappedPosition.z = SnapCoordinate(worldPosition.z, warehouseShelfGridOrigin.z, warehouseShelfGridSize);
+        snappedPosition.y = 0f;
+        return snappedPosition;
+    }
+
+    private float SnapCoordinate(float value, float origin, float gridSize)
+    {
+        return origin + (Mathf.Round((value - origin) / gridSize) * gridSize);
+    }
+
+    private void CreateWarehouseShelfPreview()
+    {
+        if (warehouseShelfPreview != null)
+        {
+            return;
+        }
+
+        warehouseShelfPreview = CreateWarehouseShelf(Vector3.zero);
+        warehouseShelfPreview.gameObject.name = "WarehouseShelf_Preview";
+        warehouseShelves.Remove(warehouseShelfPreview);
+        warehouseShelfPreview.enabled = false;
+
+        Collider[] colliders = warehouseShelfPreview.GetComponentsInChildren<Collider>();
+        foreach (Collider collider in colliders)
+        {
+            collider.enabled = false;
+        }
+
+        previewRenderers = warehouseShelfPreview.GetComponentsInChildren<MeshRenderer>();
+        foreach (MeshRenderer renderer in previewRenderers)
+        {
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+
+            Material previewMaterial = new Material(renderer.material);
+            previewMaterial.color = warehouseShelfPreviewColor;
+            renderer.material = previewMaterial;
+        }
+
+        warehouseShelfPreview.gameObject.SetActive(false);
+    }
+
+    private void DestroyWarehouseShelfPreview()
+    {
+        if (warehouseShelfPreview == null)
+        {
+            return;
+        }
+
+        Destroy(warehouseShelfPreview.gameObject);
+        warehouseShelfPreview = null;
+        previewRenderers = null;
+    }
+
+    private bool IsPlacementPositionValid(Vector3 shelfWorldPosition)
+    {
+        Bounds placementBounds = new Bounds(shelfWorldPosition + new Vector3(0f, 1f, 0f), new Vector3(1.35f, 2.05f, 0.95f));
+        Vector3 overlapHalfExtents = placementBounds.extents;
+        overlapHalfExtents.x = Mathf.Max(0.05f, overlapHalfExtents.x - 0.05f);
+        overlapHalfExtents.y = Mathf.Max(0.05f, overlapHalfExtents.y - 0.04f);
+        overlapHalfExtents.z = Mathf.Max(0.05f, overlapHalfExtents.z - 0.05f);
+
+        Collider[] overlaps = Physics.OverlapBox(
+            placementBounds.center,
+            overlapHalfExtents,
+            Quaternion.identity,
+            ~0,
+            QueryTriggerInteraction.Collide);
+
+        foreach (Collider overlap in overlaps)
+        {
+            if (IsIgnoredPlacementOverlap(overlap, placementBounds))
             {
                 continue;
             }
 
-            WarehouseStockBox stockBox = activeWarehouseStockBoxes[slotIndex];
-            if (stockBox == null || product == null)
-            {
-                continue;
-            }
-
-            stockBox.gameObject.name = product.productName + "_WarehouseStock";
-            stockBox.transform.localPosition = warehouseStockLocalSlots[slotIndex];
-            stockBox.Setup(product, gameManager.GetBackroomStock(product));
-        }
-    }
-
-    private WarehouseStockBox CreateWarehouseStockBoxObject()
-    {
-        GameObject boxObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        boxObject.name = "WarehouseStock";
-        boxObject.transform.SetParent(backroomZoneRoot, false);
-        return boxObject.AddComponent<WarehouseStockBox>();
-    }
-
-    private List<ProductData> GetProductsForReservedSlots()
-    {
-        List<ProductData> products = new List<ProductData>();
-        foreach (ProductData product in gameManager.GetKnownProducts())
-        {
-            if (product == null)
-            {
-                continue;
-            }
-
-            products.Add(product);
+            return false;
         }
 
-        products.Sort((left, right) => string.Compare(left.productName, right.productName, StringComparison.OrdinalIgnoreCase));
-        return products;
+        return true;
     }
 
-    private void AssignReservedSlots(List<ProductData> products)
+    private bool IsIgnoredPlacementOverlap(Collider overlap, Bounds placementBounds)
     {
-        foreach (ProductData product in products)
+        if (overlap == null)
         {
-            if (product == null ||
-                string.IsNullOrWhiteSpace(product.productName) ||
-                reservedSlotByProductName.ContainsKey(product.productName) ||
-                reservedSlotByProductName.Count >= warehouseStockLocalSlots.Length)
-            {
-                continue;
-            }
+            return true;
+        }
 
-            reservedSlotByProductName[product.productName] = reservedSlotByProductName.Count;
+        if (warehouseShelfPreview != null && overlap.transform.IsChildOf(warehouseShelfPreview.transform))
+        {
+            return true;
+        }
+
+        return IsPlacementSurface(overlap, placementBounds);
+    }
+
+    private bool IsPlacementSurface(Collider overlap, Bounds placementBounds)
+    {
+        Bounds overlapBounds = overlap.bounds;
+        bool isBelowShelf = overlapBounds.max.y <= placementBounds.min.y + 0.12f;
+        bool isThinSurface = overlapBounds.size.y <= 0.2f;
+        string overlapName = overlap.gameObject.name;
+        bool looksLikeGround = overlapName.Contains("Floor") ||
+                               overlapName.Contains("Ground") ||
+                               overlapName.Contains("Pad") ||
+                               overlapName.Contains("Zone");
+
+        return isBelowShelf && (isThinSurface || looksLikeGround);
+    }
+
+    private void ApplyPreviewColor(bool isValidPlacement)
+    {
+        if (previewRenderers == null)
+        {
+            return;
+        }
+
+        Color targetColor = isValidPlacement ? warehouseShelfPreviewColor : invalidWarehouseShelfPreviewColor;
+        foreach (MeshRenderer renderer in previewRenderers)
+        {
+            if (renderer != null && renderer.material != null)
+            {
+                renderer.material.color = targetColor;
+            }
         }
     }
 
@@ -341,13 +645,54 @@ public class WarehouseManager : MonoBehaviour
         signObject.transform.localPosition = new Vector3(0f, 2.45f, warehouseZoneSize.z * 0.5f - 0.35f);
 
         TextMeshPro sign = signObject.AddComponent<TextMeshPro>();
-        sign.text = "BACKROOM WAREHOUSE\nBulk Crates Here";
+        sign.text = "BACKROOM WAREHOUSE\nPlace Crates on Shelves";
         sign.fontSize = 5f;
         sign.alignment = TextAlignmentOptions.Center;
         sign.color = Color.white;
         sign.outlineColor = new Color(0f, 0f, 0f, 0.75f);
         sign.outlineWidth = 0.2f;
         signObject.AddComponent<BillboardToCamera>();
+    }
+
+    private void CreateBackroomDropPad()
+    {
+        GameObject zoneObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        zoneObject.name = "BackroomStoragePad";
+        zoneObject.transform.SetParent(backroomZoneRoot, false);
+        zoneObject.transform.localPosition = new Vector3(backroomDropOffPosition.x - warehouseZoneCenter.x,
+                                                         -backroomDropOffPosition.y + (backroomZoneSize.y * 0.5f),
+                                                         backroomDropOffPosition.z - warehouseZoneCenter.z);
+        zoneObject.transform.localScale = backroomZoneSize;
+
+        Collider zoneCollider = zoneObject.GetComponent<Collider>();
+        if (zoneCollider != null)
+        {
+            Destroy(zoneCollider);
+        }
+
+        MeshRenderer zoneRenderer = zoneObject.GetComponent<MeshRenderer>();
+        if (zoneRenderer != null)
+        {
+            Material zoneMaterial = gameManager.CreateRuntimeMaterial(backroomZoneColor);
+            zoneRenderer.material = zoneMaterial;
+            zoneRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            zoneRenderer.receiveShadows = false;
+        }
+
+        GameObject labelObject = new GameObject("BackroomStorageLabel");
+        labelObject.transform.SetParent(backroomZoneRoot, false);
+        labelObject.transform.localPosition = new Vector3(backroomDropOffPosition.x - warehouseZoneCenter.x,
+                                                          backroomZoneLabelOffset.y,
+                                                          backroomDropOffPosition.z - warehouseZoneCenter.z + backroomZoneLabelOffset.z);
+
+        TextMeshPro label = labelObject.AddComponent<TextMeshPro>();
+        label.text = "WAREHOUSE STORAGE\nUse Shelf Slots";
+        label.fontSize = 4f;
+        label.alignment = TextAlignmentOptions.Center;
+        label.color = Color.white;
+        label.outlineColor = new Color(0f, 0f, 0f, 0.7f);
+        label.outlineWidth = 0.15f;
+        labelObject.AddComponent<BillboardToCamera>();
     }
 
     private void CreateWarehousePanel(string objectName, Vector3 localPosition, Vector3 localScale)
@@ -368,51 +713,6 @@ public class WarehouseManager : MonoBehaviour
         }
     }
 
-    private void CreateWarehouseRacks()
-    {
-        CreateWarehouseRack(new Vector3(-2.3f, 0f, 0.7f));
-        CreateWarehouseRack(new Vector3(0f, 0f, 0.7f));
-        CreateWarehouseRack(new Vector3(2.3f, 0f, 0.7f));
-    }
-
-    private void CreateWarehouseRack(Vector3 localCenter)
-    {
-        CreateWarehouseRackPart("Rack_LeftPost", localCenter + new Vector3(-0.55f, 1.1f, 0f), new Vector3(0.12f, 2.2f, 0.12f), true);
-        CreateWarehouseRackPart("Rack_RightPost", localCenter + new Vector3(0.55f, 1.1f, 0f), new Vector3(0.12f, 2.2f, 0.12f), true);
-        CreateWarehouseRackPart("Rack_BackPostLeft", localCenter + new Vector3(-0.55f, 1.1f, -0.65f), new Vector3(0.12f, 2.2f, 0.12f), true);
-        CreateWarehouseRackPart("Rack_BackPostRight", localCenter + new Vector3(0.55f, 1.1f, -0.65f), new Vector3(0.12f, 2.2f, 0.12f), true);
-        CreateWarehouseRackPart("RackShelf", localCenter + new Vector3(0f, 0.45f, -0.32f), new Vector3(1.2f, 0.08f, 0.72f), false);
-        CreateWarehouseRackPart("RackShelf", localCenter + new Vector3(0f, 1.15f, -0.32f), new Vector3(1.2f, 0.08f, 0.72f), false);
-        CreateWarehouseRackPart("RackShelf", localCenter + new Vector3(0f, 1.85f, -0.32f), new Vector3(1.2f, 0.08f, 0.72f), false);
-    }
-
-    private void CreateWarehouseRackPart(string objectName, Vector3 localPosition, Vector3 localScale, bool keepCollider)
-    {
-        GameObject rackPart = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        rackPart.name = objectName;
-        rackPart.transform.SetParent(backroomZoneRoot, false);
-        rackPart.transform.localPosition = localPosition;
-        rackPart.transform.localScale = localScale;
-
-        if (!keepCollider)
-        {
-            Collider rackCollider = rackPart.GetComponent<Collider>();
-            if (rackCollider != null)
-            {
-                Destroy(rackCollider);
-            }
-        }
-
-        MeshRenderer rackRenderer = rackPart.GetComponent<MeshRenderer>();
-        if (rackRenderer != null)
-        {
-            Material rackMaterial = gameManager.CreateRuntimeMaterial(warehouseRackColor);
-            rackRenderer.material = rackMaterial;
-            rackRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            rackRenderer.receiveShadows = false;
-        }
-    }
-
     private void UpdateBackroomZoneTransform()
     {
         if (backroomZoneRoot == null)
@@ -421,5 +721,15 @@ public class WarehouseManager : MonoBehaviour
         }
 
         backroomZoneRoot.position = warehouseZoneCenter;
+    }
+
+    private void ResolveDefaultVisualPrefab()
+    {
+#if UNITY_EDITOR
+        if (warehouseShelfVisualPrefab == null)
+        {
+            warehouseShelfVisualPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/LowPolyMetalRack/Prefabs/WireShelf C.prefab");
+        }
+#endif
     }
 }

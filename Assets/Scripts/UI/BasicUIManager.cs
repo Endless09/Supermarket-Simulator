@@ -89,6 +89,7 @@ public class BasicUIManager : MonoBehaviour
     private Button computerCloseButton;
     private Button computerOrderStockButton;
     private Button computerBuyShelfButton;
+    private Button computerBuyWarehouseShelfButton;
     private bool isPauseMenuOpen;
     private bool isComputerOpen;
     private float timeScaleBeforePause = 1f;
@@ -190,6 +191,14 @@ public class BasicUIManager : MonoBehaviour
         }
     }
 
+    public void BuyWarehouseShelfButton()
+    {
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.StartWarehouseShelfPlacement();
+        }
+    }
+
     public void BuySelectedProductStockButton()
     {
         if (GameManager.Instance != null && selectedProduct != null)
@@ -200,12 +209,7 @@ public class BasicUIManager : MonoBehaviour
 
     public void RestockAllShelvesButton()
     {
-        Shelf[] shelves = FindObjectsByType<Shelf>();
-
-        foreach (Shelf shelf in shelves)
-        {
-            shelf.RestockFromBackroom();
-        }
+        Debug.Log("Automatic restock is disabled. Pick up boxes from warehouse shelves manually.");
     }
 
     public void RestockSelectedShelfButton()
@@ -225,10 +229,7 @@ public class BasicUIManager : MonoBehaviour
             }
         }
 
-        if (targetShelf != null)
-        {
-            GameManager.Instance.PrepareRestockForShelf(targetShelf);
-        }
+        Debug.Log("Manual restock is required. Pick up a box from a warehouse shelf and apply it to the selected store shelf.");
     }
 
     public void MoveSelectedShelfButton()
@@ -418,7 +419,7 @@ public class BasicUIManager : MonoBehaviour
         }
 
         inventoryText.text =
-            "Backroom: " + stock +
+            "Warehouse shelves: " + stock +
             "\nAt loading dock: " + (atDock > 0 ? "+" + atDock : "None") +
             "\nIncoming delivery: " + incomingLabel;
 
@@ -865,10 +866,11 @@ public class BasicUIManager : MonoBehaviour
             "ComputerFurnitureText",
             computerFurniturePanel,
             new Vector2(28f, -72f),
-            new Vector2(720f, 120f),
+            new Vector2(820f, 150f),
             24f,
-            "Shelf\nUnit Price: $50.00\nAdds an empty shelf that can be placed on the store grid.");
-        computerBuyShelfButton = CreateComputerButton("ComputerBuyShelfButton", "Buy Shelf", BuyShelfButton, computerFurniturePanel, new Vector2(28f, -196f), new Vector2(260f, 46f));
+            "Store Shelf\nUnit Price: $50.00\nAdds an empty customer-facing shelf.\n\nWarehouse Shelf\nUnit Price: $100.00\nAdds six physical box slots for delivered stock.");
+        computerBuyShelfButton = CreateComputerButton("ComputerBuyShelfButton", "Buy Store Shelf", BuyShelfButton, computerFurniturePanel, new Vector2(28f, -226f), new Vector2(260f, 46f));
+        computerBuyWarehouseShelfButton = CreateComputerButton("ComputerBuyWarehouseShelfButton", "Buy Warehouse Shelf", BuyWarehouseShelfButton, computerFurniturePanel, new Vector2(304f, -226f), new Vector2(300f, 46f));
     }
 
     private void BuildComputerProductButtons()
@@ -1460,7 +1462,7 @@ public class BasicUIManager : MonoBehaviour
             "\nOrder cost: $" + orderCost.ToString("0.00");
 
         computerMarketStockText.text =
-            "Backroom stock: " + stock +
+            "Warehouse shelf stock: " + stock +
             "\nAt loading dock: " + (atDock > 0 ? "+" + atDock : "None") +
             "\nIncoming delivery: " + (incoming > 0 ? "+" + incoming : "None");
     }
@@ -1495,6 +1497,7 @@ public class BasicUIManager : MonoBehaviour
 
         SetButtonState(computerOrderStockButton, hasSelectedProduct);
         SetButtonState(computerBuyShelfButton, canPlaceShelf);
+        SetButtonState(computerBuyWarehouseShelfButton, canPlaceShelf);
         UpdateComputerTexts();
         UpdateComputerProductButtonVisuals();
     }

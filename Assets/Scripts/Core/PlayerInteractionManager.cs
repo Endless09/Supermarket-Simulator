@@ -30,7 +30,6 @@ public class PlayerInteractionManager : MonoBehaviour
         DeliveryManager deliveryManager = gameManager.DeliveryManager;
         WarehouseManager warehouseManager = gameManager.WarehouseManager;
         TrashManager trashManager = gameManager.TrashManager;
-        bool isLookingAtBackroomDropZone = false;
         bool isLookingAtTrashZone = false;
 
         if (gameManager.IsMovingShelf)
@@ -40,15 +39,9 @@ public class PlayerInteractionManager : MonoBehaviour
 
         if (gameManager.IsPlacingShelf)
         {
-            return "Left click to place new shelf, right click to cancel";
-        }
-
-        if (deliveryManager != null &&
-            deliveryManager.IsCarryingCrate &&
-            warehouseManager != null &&
-            gameManager.TryGetPlacementPositionFromMouse(out Vector3 promptPlacementPosition))
-        {
-            isLookingAtBackroomDropZone = warehouseManager.IsPointInsideDropZone(promptPlacementPosition);
+            return gameManager.IsPlacingWarehouseShelf
+                ? "Left click to place warehouse shelf, right click to cancel"
+                : "Left click to place new shelf, right click to cancel";
         }
 
         if (gameManager.IsCarryingEmptyBox &&
@@ -65,16 +58,16 @@ public class PlayerInteractionManager : MonoBehaviour
                 : "Take the empty box to the Baler";
         }
 
-        if (!TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out StoreComputer computer))
+        if (!TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out WarehouseShelf warehouseShelf, out StoreComputer computer))
         {
             if (deliveryManager != null && deliveryManager.IsCarryingCrate)
             {
-                return deliveryManager.GetCarryInteractionPrompt(isLookingAtBackroomDropZone);
+                return deliveryManager.GetCarryInteractionPrompt(false);
             }
 
             if (gameManager.IsCarryingRestockBox)
             {
-                return "Look at a matching shelf and press [E] to stock it";
+                return "Look at a store shelf to stock it, or a warehouse shelf to return it";
             }
 
             return string.Empty;
@@ -102,20 +95,29 @@ public class PlayerInteractionManager : MonoBehaviour
             !gameManager.IsCarryingRestockBox &&
             !gameManager.IsCarryingEmptyBox)
         {
-            return warehouseManager != null
-                ? warehouseManager.GetPrompt(warehouseStockBox, gameManager.GetSelectedOrFocusedShelf(), mainCamera)
-                : string.Empty;
+            return "Legacy backroom stock is now stored on warehouse shelves.";
+        }
+
+        if (warehouseShelf != null && warehouseManager != null)
+        {
+            ProductData carriedProduct = null;
+            bool isCarryingWarehouseBox = false;
+
+            if (deliveryManager != null && deliveryManager.IsCarryingCrate)
+            {
+                carriedProduct = deliveryManager.CarriedCrateProduct;
+            }
+            else if (gameManager.IsCarryingRestockBox)
+            {
+                carriedProduct = gameManager.CarriedRestockProduct;
+                isCarryingWarehouseBox = true;
+            }
+
+            return warehouseManager.GetPrompt(warehouseShelf, carriedProduct, isCarryingWarehouseBox, gameManager.GetSelectedOrFocusedShelf(), mainCamera);
         }
 
         if (shelf != null)
         {
-            if (deliveryManager != null &&
-                deliveryManager.IsCarryingCrate &&
-                shelf.CanAcceptProduct(deliveryManager.CarriedCrateProduct))
-            {
-                return "[E] Stock shelf from crate";
-            }
-
             if (gameManager.IsCarryingRestockBox && shelf.CanAcceptRestock(gameManager.CarriedRestockProduct))
             {
                 return "[E] Stock shelf";
@@ -136,15 +138,6 @@ public class PlayerInteractionManager : MonoBehaviour
         WarehouseManager warehouseManager = gameManager.WarehouseManager;
         TrashManager trashManager = gameManager.TrashManager;
 
-        bool isLookingAtBackroomDropZone = false;
-        if (deliveryManager != null &&
-            deliveryManager.IsCarryingCrate &&
-            warehouseManager != null &&
-            gameManager.TryGetPlacementPositionFromMouse(out Vector3 interactionPlacementPosition))
-        {
-            isLookingAtBackroomDropZone = warehouseManager.IsPointInsideDropZone(interactionPlacementPosition);
-        }
-
         if (gameManager.IsCarryingEmptyBox &&
             trashManager != null &&
             gameManager.TryGetPlacementPositionFromMouse(out Vector3 trashInteractionPosition) &&
@@ -154,13 +147,7 @@ public class PlayerInteractionManager : MonoBehaviour
             return;
         }
 
-        if (isLookingAtBackroomDropZone && deliveryManager != null && deliveryManager.IsCarryingCrate)
-        {
-            deliveryManager.TryUnloadCarriedCrateAtDropZone(true);
-            return;
-        }
-
-        if (TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out StoreComputer computer))
+        if (TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out WarehouseShelf warehouseShelf, out StoreComputer computer))
         {
             if (computer != null &&
                 !gameManager.IsCarryingRestockBox &&
@@ -183,6 +170,12 @@ public class PlayerInteractionManager : MonoBehaviour
                 return;
             }
 
+            if (warehouseShelf != null)
+            {
+                gameManager.HandleWarehouseShelfClicked(warehouseShelf);
+                return;
+            }
+
             if (shelf != null)
             {
                 gameManager.HandleShelfClicked(shelf);
@@ -198,20 +191,22 @@ public class PlayerInteractionManager : MonoBehaviour
 
     public Shelf GetFocusedShelf()
     {
-        return TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out StoreComputer computer) &&
+        return TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out WarehouseShelf warehouseShelf, out StoreComputer computer) &&
                shelf != null &&
                crate == null &&
                warehouseStockBox == null &&
+               warehouseShelf == null &&
                computer == null
             ? shelf
             : null;
     }
 
-    public bool TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out StoreComputer computer)
+    public bool TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out WarehouseShelf warehouseShelf, out StoreComputer computer)
     {
         shelf = null;
         crate = null;
         warehouseStockBox = null;
+        warehouseShelf = null;
         computer = null;
 
         if (mainCamera == null)
@@ -249,6 +244,12 @@ public class PlayerInteractionManager : MonoBehaviour
 
             warehouseStockBox = hit.collider.GetComponentInParent<WarehouseStockBox>();
             if (warehouseStockBox != null)
+            {
+                return true;
+            }
+
+            warehouseShelf = hit.collider.GetComponentInParent<WarehouseShelf>();
+            if (warehouseShelf != null)
             {
                 return true;
             }

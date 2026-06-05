@@ -177,12 +177,12 @@ public class DeliveryManager : MonoBehaviour
         if (carriedDeliveryCrate != null && carriedDeliveryCrate.Product != null)
         {
             return "Carrying: " + carriedDeliveryCrate.Product.productName + " x" + carriedDeliveryCrate.Amount +
-                   "\nDrop it on Backroom Storage or stock a shelf";
+                   "\nPlace it on a warehouse shelf";
         }
 
         if (HasAnyDockCrates())
         {
-            return "Dock crates ready\nClick a crate, then drop it on Backroom Storage";
+            return "Dock crates ready\nPick one up, then place it on a warehouse shelf";
         }
 
         return string.Empty;
@@ -195,9 +195,7 @@ public class DeliveryManager : MonoBehaviour
             return string.Empty;
         }
 
-        return isLookingAtBackroomDropZone
-            ? "[E] Unload crate into backroom"
-            : "Look at Backroom Storage and press [E] to unload";
+        return "Look at a compatible warehouse shelf and press [E]";
     }
 
     public ProductData CarriedCrateProduct => carriedDeliveryCrate != null ? carriedDeliveryCrate.Product : null;
@@ -237,42 +235,32 @@ public class DeliveryManager : MonoBehaviour
 
     public bool TryUnloadCarriedCrateAtDropZone(bool isInsideDropZone)
     {
-        if (carriedDeliveryCrate == null || !isInsideDropZone)
-        {
-            return false;
-        }
-
-        UnloadDeliveryCrate(carriedDeliveryCrate);
-        return true;
+        return false;
     }
 
     public bool TryApplyCarriedCrateToShelf(Shelf shelf)
     {
-        if (carriedDeliveryCrate == null || shelf == null || !shelf.CanAcceptProduct(carriedDeliveryCrate.Product))
+        return false;
+    }
+
+    public bool TryPlaceCarriedCrateOnWarehouseShelf(WarehouseShelf shelf)
+    {
+        if (carriedDeliveryCrate == null || shelf == null || gameManager == null)
         {
             return false;
         }
 
-        int addedAmount = shelf.AddStock(carriedDeliveryCrate.Product, carriedDeliveryCrate.Amount);
-        if (addedAmount <= 0)
+        ProductData product = carriedDeliveryCrate.Product;
+        int amount = carriedDeliveryCrate.Amount;
+        if (!gameManager.TryPlaceBoxOnWarehouseShelf(shelf, product, amount))
         {
             return false;
         }
 
-        int leftoverAmount = carriedDeliveryCrate.Amount - addedAmount;
-        if (leftoverAmount > 0)
-        {
-            carriedDeliveryCrate.SetAmount(leftoverAmount);
-        }
-        else
-        {
-            ProductData emptiedProduct = carriedDeliveryCrate.Product;
-            activeDeliveryCrates.Remove(carriedDeliveryCrate);
-            Destroy(carriedDeliveryCrate.gameObject);
-            carriedDeliveryCrate = null;
-            gameManager.CreateCarriedEmptyBox(emptiedProduct);
-        }
-
+        activeDeliveryCrates.Remove(carriedDeliveryCrate);
+        Destroy(carriedDeliveryCrate.gameObject);
+        carriedDeliveryCrate = null;
+        ArrangeDeliveryCrates();
         gameManager.NotifyStateChanged();
         return true;
     }

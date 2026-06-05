@@ -22,6 +22,7 @@ public class GameSaveData
     public List<DeliveryManager.QueuedDeliveryState> deliveries = new List<DeliveryManager.QueuedDeliveryState>();
     public List<DeliveryManager.DockCrateState> deliveryCrates = new List<DeliveryManager.DockCrateState>();
     public List<RestockBoxSaveEntry> restockBoxes = new List<RestockBoxSaveEntry>();
+    public List<WarehouseShelfSaveEntry> warehouseShelves = new List<WarehouseShelfSaveEntry>();
 }
 
 [Serializable]
@@ -46,4 +47,20 @@ public class RestockBoxSaveEntry
     public int amount;
     public Vector3 position;
     public bool isCarried;
+}
+
+[Serializable]
+public class WarehouseShelfSaveEntry
+{
+    public string lockedProductName;
+    public Vector3 position;
+    public List<WarehouseShelfSlotSaveEntry> slots = new List<WarehouseShelfSlotSaveEntry>();
+}
+
+[Serializable]
+public class WarehouseShelfSlotSaveEntry
+{
+    public int slotIndex;
+    public string productName;
+    public int amount;
 }

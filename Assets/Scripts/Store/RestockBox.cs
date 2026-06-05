@@ -50,6 +50,12 @@ public class RestockBox : MonoBehaviour
         UpdateLabel();
     }
 
+    public void SetAmount(int newAmount)
+    {
+        amount = Mathf.Max(1, newAmount);
+        UpdateLabel();
+    }
+
     private void CreateLabel()
     {
         GameObject labelObject = new GameObject("RestockLabel");
