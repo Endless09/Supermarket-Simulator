@@ -24,6 +24,7 @@ public class Customer : MonoBehaviour
     [SerializeField] private float repathInterval = 0.4f;
     [SerializeField] private float shelfBrowseTime = 1.25f;
     [SerializeField] private float checkoutDuration = 2f;
+    [SerializeField] private float shelfApproachDistance = 0.9f;
 
     private CheckoutRegister checkoutRegister;
     private Transform exitPoint;
@@ -123,7 +124,7 @@ public class Customer : MonoBehaviour
         repathTimer -= Time.deltaTime;
         if (repathTimer <= 0f)
         {
-            SetDestination(targetShelf.transform.position);
+            SetDestination(GetShelfBrowseDestination(targetShelf));
             repathTimer = repathInterval;
         }
 
@@ -139,6 +140,7 @@ public class Customer : MonoBehaviour
                 }
             }
 
+            FaceTarget(targetShelf.transform.position);
             shelfBrowseTimer -= Time.deltaTime;
             if (shelfBrowseTimer > 0f)
             {
@@ -192,6 +194,8 @@ public class Customer : MonoBehaviour
 
         if (!navMeshAgent.pathPending && navMeshAgent.remainingDistance <= stoppingDistance)
         {
+            FaceTarget(checkoutRegister.GetServiceLookPosition());
+
             if (!checkoutRegister.IsFirstInQueue(this))
             {
                 UpdateStatusLabel();
@@ -217,6 +221,7 @@ public class Customer : MonoBehaviour
             return;
         }
 
+        FaceTarget(checkoutRegister.GetServiceLookPosition());
         foreach (ProductData product in carriedProducts)
         {
             checkoutRegister.ProcessCustomer(this, product);
@@ -271,7 +276,7 @@ public class Customer : MonoBehaviour
                 navMeshAgent.isStopped = false;
             }
 
-            SetDestination(targetShelf.transform.position);
+            SetDestination(GetShelfBrowseDestination(targetShelf));
             repathTimer = repathInterval;
             UpdateStatusLabel();
             return;
@@ -291,7 +296,7 @@ public class Customer : MonoBehaviour
                     navMeshAgent.isStopped = false;
                 }
 
-                SetDestination(targetShelf.transform.position);
+                SetDestination(GetShelfBrowseDestination(targetShelf));
                 repathTimer = repathInterval;
                 UpdateStatusLabel();
                 return;
@@ -376,7 +381,41 @@ public class Customer : MonoBehaviour
             return;
         }
 
-        navMeshAgent.SetDestination(targetPosition);
+        navMeshAgent.SetDestination(GetNearestNavMeshPosition(targetPosition));
+    }
+
+    private Vector3 GetShelfBrowseDestination(Shelf shelf)
+    {
+        if (shelf == null)
+        {
+            return transform.position;
+        }
+
+        return shelf.GetCustomerBrowsePosition(shelfApproachDistance);
+    }
+
+    private Vector3 GetNearestNavMeshPosition(Vector3 desiredPosition)
+    {
+        if (NavMesh.SamplePosition(desiredPosition, out NavMeshHit hit, 1.5f, NavMesh.AllAreas))
+        {
+            return hit.position;
+        }
+
+        return desiredPosition;
+    }
+
+    private void FaceTarget(Vector3 targetPosition)
+    {
+        Vector3 direction = targetPosition - transform.position;
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude <= 0.001f)
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+        transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, 540f * Time.deltaTime);
     }
 
     private void AddMissingProduct(ProductData product)

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.AI;
 
 /// <summary>
 /// Handles the moment when a customer pays for a product.
@@ -61,7 +62,15 @@ public class CheckoutRegister : MonoBehaviour
         }
 
         Vector3 localPosition = queueStartOffset + (queueSpacing * queueIndex);
-        return transform.TransformPoint(localPosition);
+        Vector3 desiredPosition = transform.TransformPoint(localPosition);
+        return NavMesh.SamplePosition(desiredPosition, out NavMeshHit hit, 1.5f, NavMesh.AllAreas)
+            ? hit.position
+            : desiredPosition;
+    }
+
+    public Vector3 GetServiceLookPosition()
+    {
+        return transform.position;
     }
 
     public void ProcessCustomer(Customer customer, ProductData product)

@@ -44,6 +44,24 @@ public class Shelf : MonoBehaviour
         return assignedProduct == product;
     }
 
+    public Vector3 GetCustomerBrowsePosition(float approachDistance = 0.9f)
+    {
+        Bounds shelfBounds = GetShelfWorldBounds();
+        Vector3 frontDirection = transform.forward;
+
+        if (frontDirection.sqrMagnitude <= 0.001f)
+        {
+            frontDirection = Vector3.forward;
+        }
+
+        frontDirection.y = 0f;
+        frontDirection.Normalize();
+
+        Vector3 browsePosition = shelfBounds.center + (frontDirection * (shelfBounds.extents.z + approachDistance));
+        browsePosition.y = transform.position.y;
+        return browsePosition;
+    }
+
     public bool TryTakeOneItem()
     {
         if (!HasStock)
@@ -211,6 +229,33 @@ public class Shelf : MonoBehaviour
             : emptyColor;
 
         shelfRenderer.material.color = isSelected ? Color.Lerp(baseColor, selectedColor, 0.55f) : baseColor;
+    }
+
+    private Bounds GetShelfWorldBounds()
+    {
+        Collider[] colliders = GetComponentsInChildren<Collider>();
+        Bounds bounds = new Bounds(transform.position, Vector3.one);
+        bool hasBounds = false;
+
+        foreach (Collider shelfCollider in colliders)
+        {
+            if (shelfCollider == null || !shelfCollider.enabled)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = shelfCollider.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(shelfCollider.bounds);
+            }
+        }
+
+        return bounds;
     }
 
     private void EnsureRuntimeLabel()
