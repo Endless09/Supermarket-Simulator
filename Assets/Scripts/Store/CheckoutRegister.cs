@@ -82,10 +82,14 @@ public class CheckoutRegister : MonoBehaviour
 
         if (product != null && moneyManager != null)
         {
-            moneyManager.AddMoney(product.price);
+            float salePrice = GameManager.Instance != null
+                ? GameManager.Instance.GetProductSalePrice(product)
+                : product.price;
+            moneyManager.AddMoney(salePrice);
 
             if (GameManager.Instance != null)
             {
+                GameManager.Instance.RecordCustomerPurchase(product);
                 GameManager.Instance.NotifyStateChanged();
             }
         }

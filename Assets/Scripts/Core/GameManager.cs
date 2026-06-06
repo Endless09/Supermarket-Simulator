@@ -48,6 +48,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float heldObjectVerticalOffset = 0.15f;
 
     private readonly ProductInventoryManager productInventory = new ProductInventoryManager();
+    private readonly ProductPricingManager productPricing = new ProductPricingManager();
     private readonly List<RestockBox> activeRestockBoxes = new List<RestockBox>();
     private const string CustomersStillInsideWarning = "Customers are still inside. Press Next Day again to continue anyway.";
 
@@ -75,6 +76,9 @@ public class GameManager : MonoBehaviour
     private RuntimeSceneManager runtimeSceneManager;
     private bool isStateDirty;
     private bool nextDayCustomerWarningPending;
+    private int dailyItemsSold;
+    private int dailyMissingItems;
+    private int dailyTooExpensiveItems;
 
     private void Awake()
     {
@@ -328,6 +332,52 @@ public class GameManager : MonoBehaviour
     public void RegisterKnownProduct(ProductData product)
     {
         productInventory.RegisterKnownProduct(product);
+        productPricing.GetSalePrice(product);
+    }
+
+    public float GetProductSalePrice(ProductData product)
+    {
+        return productPricing.GetSalePrice(product);
+    }
+
+    public void SetProductSalePrice(ProductData product, float price)
+    {
+        productPricing.SetSalePrice(product, price);
+        NotifyStateChanged();
+        RefreshShelfLabels();
+    }
+
+    public void ResetProductSalePrice(ProductData product)
+    {
+        productPricing.ResetSalePrice(product);
+        NotifyStateChanged();
+        RefreshShelfLabels();
+    }
+
+    public void RecordCustomerPurchase(ProductData product)
+    {
+        if (product == null)
+        {
+            return;
+        }
+
+        dailyItemsSold++;
+        NotifyStateChanged();
+    }
+
+    public void RecordCustomerShoppingFeedback(int missingItemCount, int tooExpensiveItemCount)
+    {
+        dailyMissingItems += Mathf.Max(0, missingItemCount);
+        dailyTooExpensiveItems += Mathf.Max(0, tooExpensiveItemCount);
+        NotifyStateChanged();
+    }
+
+    public string GetDailyCustomerFeedbackReport()
+    {
+        return "Today's Feedback" +
+               "\nItems sold: " + dailyItemsSold +
+               "\nCould not find: " + dailyMissingItems +
+               "\nToo expensive: " + dailyTooExpensiveItems;
     }
 
     public void NotifyStateChanged()
@@ -904,6 +954,15 @@ public class GameManager : MonoBehaviour
         return productInventory.GetKnownProducts();
     }
 
+    private void RefreshShelfLabels()
+    {
+        Shelf[] shelves = FindObjectsByType<Shelf>();
+        foreach (Shelf shelf in shelves)
+        {
+            shelf?.RefreshDisplay();
+        }
+    }
+
     public Vector3 GetHeldObjectPosition()
     {
         if (mainCamera == null)
@@ -1010,12 +1069,14 @@ public class GameManager : MonoBehaviour
             ClearRestockBoxes();
             EnsureWarehouseManager();
             warehouseManager?.ClearWarehouseShelves();
+            productPricing.ResetAll();
             BuildStartingInventory();
             MigrateBackroomInventoryToWarehouseShelves();
             CurrentDay = startingDay;
             EnsureDayNightCycle();
             dayNightCycle?.ResetToOpeningTime();
             nextDayCustomerWarningPending = false;
+            ResetDailyCustomerFeedback();
             isStateDirty = true;
             defaultShelfProduct = initialDefaultShelfProduct;
             EnsureShelfPlacementManager();
@@ -1055,7 +1116,10 @@ public class GameManager : MonoBehaviour
             dayPhase = dayNightCycle != null ? (int)dayNightCycle.CurrentPhase : (int)DayNightCycle.DayPhase.BeforeOpen,
             currentTimeOfDayHours = dayNightCycle != null ? dayNightCycle.CurrentTimeOfDayHours : 8f,
             currentDayProgress = dayNightCycle != null ? dayNightCycle.CurrentDayProgress : 0f,
-            isStoreOpen = dayNightCycle == null || dayNightCycle.IsStoreOpen
+            isStoreOpen = dayNightCycle == null || dayNightCycle.IsStoreOpen,
+            dailyItemsSold = dailyItemsSold,
+            dailyMissingItems = dailyMissingItems,
+            dailyTooExpensiveItems = dailyTooExpensiveItems
         };
 
         MigrateBackroomInventoryToWarehouseShelves();
@@ -1119,6 +1183,8 @@ public class GameManager : MonoBehaviour
             });
         }
 
+        saveData.productPrices = productPricing.BuildSaveEntries();
+
         return saveData;
     }
 
@@ -1139,7 +1205,11 @@ public class GameManager : MonoBehaviour
             ClearRestockBoxes();
             EnsureWarehouseManager();
             warehouseManager?.ClearWarehouseShelves();
+            productPricing.ResetAll();
             CurrentDay = Mathf.Max(1, saveData.currentDay);
+            dailyItemsSold = Mathf.Max(0, saveData.dailyItemsSold);
+            dailyMissingItems = Mathf.Max(0, saveData.dailyMissingItems);
+            dailyTooExpensiveItems = Mathf.Max(0, saveData.dailyTooExpensiveItems);
             EnsureDayNightCycle();
             if (dayNightCycle != null)
             {
@@ -1212,6 +1282,18 @@ public class GameManager : MonoBehaviour
                 SpawnRestockBox(product, boxEntry.amount, boxEntry.position, boxEntry.isCarried);
             }
 
+            if (saveData.productPrices != null)
+            {
+                foreach (ProductPriceSaveEntry priceEntry in saveData.productPrices)
+                {
+                    ProductData product = ResolveProductByName(priceEntry.productName);
+                    if (product != null)
+                    {
+                        productPricing.SetSalePrice(product, priceEntry.salePrice);
+                    }
+                }
+            }
+
             if (warehouseManager != null && saveData.warehouseShelves != null)
             {
                 foreach (WarehouseShelfSaveEntry warehouseShelfEntry in saveData.warehouseShelves)
@@ -1266,6 +1348,7 @@ public class GameManager : MonoBehaviour
             }
 
             MigrateBackroomInventoryToWarehouseShelves();
+            RefreshShelfLabels();
         }
         finally
         {
@@ -1293,11 +1376,19 @@ public class GameManager : MonoBehaviour
     {
         ClearActiveCustomers();
         CurrentDay++;
+        ResetDailyCustomerFeedback();
         EnsureDayNightCycle();
         dayNightCycle?.StartNextMorning();
         nextDayCustomerWarningPending = false;
         NotifyStateChanged();
         SaveGame();
+    }
+
+    private void ResetDailyCustomerFeedback()
+    {
+        dailyItemsSold = 0;
+        dailyMissingItems = 0;
+        dailyTooExpensiveItems = 0;
     }
 
     public bool GetLeftMouseButtonDown()

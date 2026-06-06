@@ -25,12 +25,15 @@ public class Customer : MonoBehaviour
     [SerializeField] private float shelfBrowseTime = 1.25f;
     [SerializeField] private float checkoutDuration = 2f;
     [SerializeField] private float shelfApproachDistance = 0.9f;
+    [SerializeField] private float expensivePriceMultiplier = 1.5f;
+    [SerializeField] private float overpricedRefusalMultiplier = 2f;
 
     private CheckoutRegister checkoutRegister;
     private Transform exitPoint;
     private readonly List<ProductData> shoppingList = new List<ProductData>();
     private readonly List<ProductData> carriedProducts = new List<ProductData>();
     private readonly List<ProductData> missingProducts = new List<ProductData>();
+    private readonly List<ProductData> tooExpensiveProducts = new List<ProductData>();
     private Shelf targetShelf;
     private CustomerState currentState;
     private NavMeshAgent navMeshAgent;
@@ -40,6 +43,7 @@ public class Customer : MonoBehaviour
     private float checkoutTimer;
     private bool isBrowsingShelf;
     private bool hasReportedMissingProducts;
+    private bool hasReportedTripFeedback;
     private bool hasJoinedCheckoutQueue;
     private TextMeshPro statusLabel;
 
@@ -74,10 +78,12 @@ public class Customer : MonoBehaviour
         shoppingList.Clear();
         carriedProducts.Clear();
         missingProducts.Clear();
+        tooExpensiveProducts.Clear();
         currentShoppingIndex = 0;
         shelfBrowseTimer = 0f;
         isBrowsingShelf = false;
         hasReportedMissingProducts = false;
+        hasReportedTripFeedback = false;
         hasJoinedCheckoutQueue = false;
 
         if (desiredProducts != null)
@@ -147,7 +153,12 @@ public class Customer : MonoBehaviour
                 return;
             }
 
-            if (targetShelf.TryTakeOneItem())
+            ProductData desiredProduct = shoppingList[currentShoppingIndex];
+            if (ShouldRefuseShelfPrice(targetShelf, desiredProduct))
+            {
+                AddTooExpensiveProduct(desiredProduct);
+            }
+            else if (targetShelf.TryTakeOneItem())
             {
                 carriedProducts.Add(targetShelf.AssignedProduct);
             }
@@ -311,7 +322,9 @@ public class Customer : MonoBehaviour
 
     private void FinishShoppingTrip()
     {
-        if ((carriedProducts.Count > 0 || missingProducts.Count > 0) && checkoutRegister != null)
+        ReportTripFeedback();
+
+        if ((carriedProducts.Count > 0 || missingProducts.Count > 0 || tooExpensiveProducts.Count > 0) && checkoutRegister != null)
         {
             currentState = CustomerState.WalkingToCheckout;
             checkoutRegister.JoinQueue(this);
@@ -321,7 +334,7 @@ public class Customer : MonoBehaviour
         }
         else
         {
-            hasReportedMissingProducts = missingProducts.Count > 0;
+            hasReportedMissingProducts = missingProducts.Count > 0 || tooExpensiveProducts.Count > 0;
             currentState = CustomerState.LeavingStore;
             if (exitPoint != null)
             {
@@ -330,6 +343,17 @@ public class Customer : MonoBehaviour
         }
 
         UpdateStatusLabel();
+    }
+
+    private void ReportTripFeedback()
+    {
+        if (hasReportedTripFeedback || GameManager.Instance == null)
+        {
+            return;
+        }
+
+        hasReportedTripFeedback = true;
+        GameManager.Instance.RecordCustomerShoppingFeedback(missingProducts.Count, tooExpensiveProducts.Count);
     }
 
     private Shelf FindBestShelfForCurrentItem()
@@ -426,6 +450,38 @@ public class Customer : MonoBehaviour
         }
     }
 
+    private void AddTooExpensiveProduct(ProductData product)
+    {
+        if (product != null)
+        {
+            tooExpensiveProducts.Add(product);
+        }
+    }
+
+    private bool ShouldRefuseShelfPrice(Shelf shelf, ProductData product)
+    {
+        if (shelf == null || product == null || GameManager.Instance == null)
+        {
+            return false;
+        }
+
+        float defaultPrice = Mathf.Max(0.05f, product.price);
+        float salePrice = GameManager.Instance.GetProductSalePrice(product);
+        float priceMultiplier = salePrice / defaultPrice;
+
+        if (priceMultiplier >= overpricedRefusalMultiplier)
+        {
+            return true;
+        }
+
+        if (priceMultiplier >= expensivePriceMultiplier)
+        {
+            return Random.value < 0.35f;
+        }
+
+        return false;
+    }
+
     private void OnDestroy()
     {
         if (checkoutRegister != null && hasJoinedCheckoutQueue)
@@ -480,10 +536,22 @@ public class Customer : MonoBehaviour
             AppendProductNames(builder, carriedProducts);
         }
 
+        if (!hasReportedMissingProducts && tooExpensiveProducts.Count > 0)
+        {
+            builder.Append("\nToo expensive: ");
+            AppendProductNames(builder, tooExpensiveProducts);
+        }
+
         if (hasReportedMissingProducts && missingProducts.Count > 0)
         {
             builder.Append("\nCould not find: ");
             AppendProductNames(builder, missingProducts);
+        }
+
+        if (hasReportedMissingProducts && tooExpensiveProducts.Count > 0)
+        {
+            builder.Append("\nToo expensive: ");
+            AppendProductNames(builder, tooExpensiveProducts);
         }
 
         if (currentState == CustomerState.CheckingOut)

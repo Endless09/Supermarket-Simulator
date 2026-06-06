@@ -17,12 +17,16 @@ public class GameSaveData
     public float currentTimeOfDayHours;
     public float currentDayProgress;
     public bool isStoreOpen;
+    public int dailyItemsSold;
+    public int dailyMissingItems;
+    public int dailyTooExpensiveItems;
     public List<InventorySaveEntry> backroomInventory = new List<InventorySaveEntry>();
     public List<ShelfSaveEntry> shelves = new List<ShelfSaveEntry>();
     public List<DeliveryManager.QueuedDeliveryState> deliveries = new List<DeliveryManager.QueuedDeliveryState>();
     public List<DeliveryManager.DockCrateState> deliveryCrates = new List<DeliveryManager.DockCrateState>();
     public List<RestockBoxSaveEntry> restockBoxes = new List<RestockBoxSaveEntry>();
     public List<WarehouseShelfSaveEntry> warehouseShelves = new List<WarehouseShelfSaveEntry>();
+    public List<ProductPriceSaveEntry> productPrices = new List<ProductPriceSaveEntry>();
 }
 
 [Serializable]
@@ -63,4 +67,11 @@ public class WarehouseShelfSlotSaveEntry
     public int slotIndex;
     public string productName;
     public int amount;
+}
+
+[Serializable]
+public class ProductPriceSaveEntry
+{
+    public string productName;
+    public float salePrice;
 }

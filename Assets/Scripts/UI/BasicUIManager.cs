@@ -65,6 +65,7 @@ public class BasicUIManager : MonoBehaviour
     private RectTransform computerSidebarPanel;
     private RectTransform computerContentPanel;
     private RectTransform computerMarketPanel;
+    private RectTransform computerPricingPanel;
     private RectTransform computerFurniturePanel;
     private RectTransform computerProductButtonPanel;
     private TMP_Text computerTitleText;
@@ -72,6 +73,7 @@ public class BasicUIManager : MonoBehaviour
     private TMP_Text computerMessageText;
     private TMP_Text computerSelectedProductText;
     private TMP_Text computerMarketStockText;
+    private TMP_Text computerPricingText;
     private TMP_Text computerFurnitureText;
     private TMP_Text pauseSettingsText;
     private Button saveGameButton;
@@ -88,9 +90,13 @@ public class BasicUIManager : MonoBehaviour
     private Button pauseSettingsBackButton;
     private readonly List<Button> computerProductButtons = new List<Button>();
     private Button computerMarketTabButton;
+    private Button computerPricingTabButton;
     private Button computerFurnitureTabButton;
     private Button computerCloseButton;
     private Button computerOrderStockButton;
+    private Button computerPriceDownButton;
+    private Button computerPriceUpButton;
+    private Button computerPriceResetButton;
     private Button computerBuyShelfButton;
     private Button computerBuyWarehouseShelfButton;
     private bool isPauseMenuOpen;
@@ -215,6 +221,28 @@ public class BasicUIManager : MonoBehaviour
                 ? "Order placed: " + selectedProduct.productName + " x" + restockPurchaseAmount
                 : "Order failed. Check your cash balance.");
         }
+    }
+
+    public void IncreaseSelectedProductPriceButton()
+    {
+        AdjustSelectedProductPrice(0.25f);
+    }
+
+    public void DecreaseSelectedProductPriceButton()
+    {
+        AdjustSelectedProductPrice(-0.25f);
+    }
+
+    public void ResetSelectedProductPriceButton()
+    {
+        if (GameManager.Instance == null || selectedProduct == null)
+        {
+            return;
+        }
+
+        GameManager.Instance.ResetProductSalePrice(selectedProduct);
+        SetComputerMessage("Price reset: " + selectedProduct.productName + " $" + GameManager.Instance.GetProductSalePrice(selectedProduct).ToString("0.00"));
+        UpdateComputerTexts();
     }
 
     public void RestockAllShelvesButton()
@@ -344,6 +372,11 @@ public class BasicUIManager : MonoBehaviour
         ShowComputerPanel(computerMarketPanel);
     }
 
+    public void ShowComputerPricing()
+    {
+        ShowComputerPanel(computerPricingPanel);
+    }
+
     public void ShowComputerFurniture()
     {
         ShowComputerPanel(computerFurniturePanel);
@@ -362,6 +395,20 @@ public class BasicUIManager : MonoBehaviour
         UpdateInventoryText();
         UpdateProductButtonVisuals();
         UpdatePersistenceButtonStates();
+    }
+
+    private void AdjustSelectedProductPrice(float delta)
+    {
+        if (GameManager.Instance == null || selectedProduct == null)
+        {
+            return;
+        }
+
+        float currentPrice = GameManager.Instance.GetProductSalePrice(selectedProduct);
+        float newPrice = Mathf.Max(0.05f, currentPrice + delta);
+        GameManager.Instance.SetProductSalePrice(selectedProduct, newPrice);
+        SetComputerMessage("Price updated: " + selectedProduct.productName + " $" + newPrice.ToString("0.00"));
+        UpdateComputerTexts();
     }
 
     public void SetSelectedShelf(Shelf shelf)
@@ -860,15 +907,18 @@ public class BasicUIManager : MonoBehaviour
 
         computerTitleText = CreateComputerLabel("ComputerTitle", computerSidebarPanel, new Vector2(22f, -24f), new Vector2(226f, 56f), 32f, "STORE OS");
         computerMarketTabButton = CreateComputerButton("ComputerMarketTab", "Market", ShowComputerMarket, computerSidebarPanel, new Vector2(22f, -110f), new Vector2(226f, 58f));
-        computerFurnitureTabButton = CreateComputerButton("ComputerFurnitureTab", "Furniture", ShowComputerFurniture, computerSidebarPanel, new Vector2(22f, -182f), new Vector2(226f, 58f));
-        computerCloseButton = CreateComputerButton("ComputerCloseButton", "Close", CloseStoreComputer, computerSidebarPanel, new Vector2(22f, -268f), new Vector2(226f, 54f));
+        computerPricingTabButton = CreateComputerButton("ComputerPricingTab", "Pricing", ShowComputerPricing, computerSidebarPanel, new Vector2(22f, -182f), new Vector2(226f, 58f));
+        computerFurnitureTabButton = CreateComputerButton("ComputerFurnitureTab", "Furniture", ShowComputerFurniture, computerSidebarPanel, new Vector2(22f, -254f), new Vector2(226f, 58f));
+        computerCloseButton = CreateComputerButton("ComputerCloseButton", "Close", CloseStoreComputer, computerSidebarPanel, new Vector2(22f, -340f), new Vector2(226f, 54f));
 
         computerStatusBarText = CreateComputerLabel("ComputerStatusBar", computerContentPanel, new Vector2(28f, -18f), new Vector2(1180f, 34f), 20f, string.Empty);
         computerMessageText = CreateComputerLabel("ComputerMessage", computerContentPanel, new Vector2(28f, -996f), new Vector2(1180f, 44f), 21f, computerMessage);
 
         computerMarketPanel = CreateComputerContentPanel("ComputerMarketPanel");
+        computerPricingPanel = CreateComputerContentPanel("ComputerPricingPanel");
         computerFurniturePanel = CreateComputerContentPanel("ComputerFurniturePanel");
         BuildComputerMarketPanel();
+        BuildComputerPricingPanel();
         BuildComputerFurniturePanel();
 
         SetStoreComputerOpen(false);
@@ -910,6 +960,22 @@ public class BasicUIManager : MonoBehaviour
             "Store Shelf\nUnit Price: $50.00\nCustomer-facing shelf for products.\n\nWarehouse Rack\nUnit Price: $100.00\nHolds 4 physical stock boxes for delivered inventory.");
         computerBuyShelfButton = CreateComputerButton("ComputerBuyShelfButton", "Buy Store Shelf", BuyShelfButton, computerFurniturePanel, new Vector2(28f, -238f), new Vector2(260f, 46f));
         computerBuyWarehouseShelfButton = CreateComputerButton("ComputerBuyWarehouseShelfButton", "Buy Warehouse Rack", BuyWarehouseShelfButton, computerFurniturePanel, new Vector2(304f, -238f), new Vector2(300f, 46f));
+    }
+
+    private void BuildComputerPricingPanel()
+    {
+        AddHeading(computerPricingPanel, "Pricing - Set Sale Prices");
+        computerPricingText = CreateComputerLabel(
+            "ComputerPricingText",
+            computerPricingPanel,
+            new Vector2(28f, -76f),
+            new Vector2(860f, 190f),
+            24f,
+            string.Empty);
+
+        computerPriceDownButton = CreateComputerButton("ComputerPriceDownButton", "- $0.25", DecreaseSelectedProductPriceButton, computerPricingPanel, new Vector2(28f, -280f), new Vector2(180f, 50f));
+        computerPriceUpButton = CreateComputerButton("ComputerPriceUpButton", "+ $0.25", IncreaseSelectedProductPriceButton, computerPricingPanel, new Vector2(226f, -280f), new Vector2(180f, 50f));
+        computerPriceResetButton = CreateComputerButton("ComputerPriceResetButton", "Reset Price", ResetSelectedProductPriceButton, computerPricingPanel, new Vector2(424f, -280f), new Vector2(220f, 50f));
     }
 
     private void BuildComputerProductButtons()
@@ -1160,6 +1226,11 @@ public class BasicUIManager : MonoBehaviour
         if (computerMarketPanel != null)
         {
             computerMarketPanel.gameObject.SetActive(panelToShow == computerMarketPanel);
+        }
+
+        if (computerPricingPanel != null)
+        {
+            computerPricingPanel.gameObject.SetActive(panelToShow == computerPricingPanel);
         }
 
         if (computerFurniturePanel != null)
@@ -1503,6 +1574,8 @@ public class BasicUIManager : MonoBehaviour
             computerMessageText.text = computerMessage;
         }
 
+        UpdateComputerPricingText();
+
         if (computerSelectedProductText == null || computerMarketStockText == null)
         {
             return;
@@ -1529,6 +1602,38 @@ public class BasicUIManager : MonoBehaviour
             "Inventory Status\nWarehouse shelf stock: " + stock +
             "\nAt loading dock: " + (atDock > 0 ? "+" + atDock : "None") +
             "\nIncoming delivery: " + (incoming > 0 ? "+" + incoming : "None");
+    }
+
+    private void UpdateComputerPricingText()
+    {
+        if (computerPricingText == null)
+        {
+            return;
+        }
+
+        if (selectedProduct == null)
+        {
+            computerPricingText.text = "No product selected\n\nSelect a product in the Market tab, then set its sale price here.";
+            return;
+        }
+
+        float salePrice = GameManager.Instance != null
+            ? GameManager.Instance.GetProductSalePrice(selectedProduct)
+            : selectedProduct.price;
+        float defaultPrice = selectedProduct.price;
+        float wholesaleCost = selectedProduct.wholesaleCost;
+        float profit = salePrice - wholesaleCost;
+        string feedbackReport = GameManager.Instance != null
+            ? GameManager.Instance.GetDailyCustomerFeedbackReport()
+            : "Today's Feedback\nItems sold: 0\nCould not find: 0\nToo expensive: 0";
+
+        computerPricingText.text =
+            "Selected Product\n" + selectedProduct.productName +
+            "\n\nDefault price: $" + defaultPrice.ToString("0.00") +
+            "\nCurrent sale price: $" + salePrice.ToString("0.00") +
+            "\nWholesale cost: $" + wholesaleCost.ToString("0.00") +
+            "\nProfit per item: $" + profit.ToString("0.00") +
+            "\n\n" + feedbackReport;
     }
 
     private void UpdatePersistenceButtonStates()
@@ -1560,6 +1665,9 @@ public class BasicUIManager : MonoBehaviour
         bool canPlaceShelf = GameManager.Instance == null || !GameManager.Instance.IsPlacingShelf;
 
         SetButtonState(computerOrderStockButton, hasSelectedProduct);
+        SetButtonState(computerPriceDownButton, hasSelectedProduct);
+        SetButtonState(computerPriceUpButton, hasSelectedProduct);
+        SetButtonState(computerPriceResetButton, hasSelectedProduct);
         SetButtonState(computerBuyShelfButton, canPlaceShelf);
         SetButtonState(computerBuyWarehouseShelfButton, canPlaceShelf);
         UpdateComputerTexts();
@@ -1570,6 +1678,7 @@ public class BasicUIManager : MonoBehaviour
     private void UpdateComputerTabVisuals()
     {
         SetComputerTabVisual(computerMarketTabButton, activeComputerPanel == computerMarketPanel);
+        SetComputerTabVisual(computerPricingTabButton, activeComputerPanel == computerPricingPanel);
         SetComputerTabVisual(computerFurnitureTabButton, activeComputerPanel == computerFurniturePanel);
     }
 

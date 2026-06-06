@@ -170,6 +170,11 @@ public class Shelf : MonoBehaviour
         ApplySelectionVisual(this.isSelected);
     }
 
+    public void RefreshDisplay()
+    {
+        UpdateStockText();
+    }
+
     private void OnMouseDown()
     {
         if (GameManager.Instance != null)
@@ -188,7 +193,13 @@ public class Shelf : MonoBehaviour
         }
 
         string productLabel = assignedProduct != null ? assignedProduct.productName : "Empty";
-        stockText.text = productLabel + "\n" + CurrentStock + "/" + maxCapacity;
+        string priceLabel = string.Empty;
+        if (assignedProduct != null && GameManager.Instance != null)
+        {
+            priceLabel = "\n$" + GameManager.Instance.GetProductSalePrice(assignedProduct).ToString("0.00");
+        }
+
+        stockText.text = productLabel + "\n" + CurrentStock + "/" + maxCapacity + priceLabel;
         stockText.color = assignedProduct != null
             ? ProductVisualUtility.GetProductColor(assignedProduct, Color.white)
             : Color.white;
