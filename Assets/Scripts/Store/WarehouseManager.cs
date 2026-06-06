@@ -11,12 +11,6 @@ using UnityEditor;
 /// </summary>
 public class WarehouseManager : MonoBehaviour
 {
-    [Header("Backroom Zone")]
-    [SerializeField] private Vector3 backroomDropOffPosition = new Vector3(-4f, 0.4f, 8f);
-    [SerializeField] private Vector3 backroomZoneSize = new Vector3(4f, 0.12f, 2.6f);
-    [SerializeField] private Vector3 backroomZoneLabelOffset = new Vector3(0f, 1.6f, -1.1f);
-    [SerializeField] private Color backroomZoneColor = new Color(0.32f, 0.57f, 0.85f, 0.95f);
-
     [Header("Warehouse Layout")]
     [SerializeField] private Vector3 warehouseZoneCenter = new Vector3(-7f, 0f, 8f);
     [SerializeField] private Vector3 warehouseZoneSize = new Vector3(10f, 3.2f, 6f);
@@ -45,7 +39,6 @@ public class WarehouseManager : MonoBehaviour
     private WarehouseShelf warehouseShelfPreview;
     private MeshRenderer[] previewRenderers;
 
-    public Vector3 BackroomDropOffPosition => backroomDropOffPosition;
     public bool IsPlacingWarehouseShelf => isPlacingWarehouseShelf;
 
     public void Initialize(GameManager owner, Camera camera, LayerMask floorLayerValue)
@@ -71,7 +64,6 @@ public class WarehouseManager : MonoBehaviour
 
         CreateWarehouseFloorPad();
         CreateWarehouseWalls();
-        CreateBackroomDropPad();
         UpdateBackroomZoneTransform();
     }
 
@@ -246,18 +238,6 @@ public class WarehouseManager : MonoBehaviour
         }
 
         return shelf.GetPrompt(carriedProduct, isCarryingWarehouseBox, targetShelf);
-    }
-
-    public bool IsPointInsideDropZone(Vector3 worldPoint)
-    {
-        Vector3 zoneCenter = new Vector3(backroomDropOffPosition.x, 0f, backroomDropOffPosition.z);
-        float halfWidth = backroomZoneSize.x * 0.5f;
-        float halfDepth = backroomZoneSize.z * 0.5f;
-
-        return worldPoint.x >= zoneCenter.x - halfWidth &&
-               worldPoint.x <= zoneCenter.x + halfWidth &&
-               worldPoint.z >= zoneCenter.z - halfDepth &&
-               worldPoint.z <= zoneCenter.z + halfDepth;
     }
 
     public bool IsPlayerInsideWarehouse(Camera camera)
@@ -642,57 +622,16 @@ public class WarehouseManager : MonoBehaviour
 
         GameObject signObject = new GameObject("BackroomWarehouseLabel");
         signObject.transform.SetParent(backroomZoneRoot, false);
-        signObject.transform.localPosition = new Vector3(0f, 2.45f, warehouseZoneSize.z * 0.5f - 0.35f);
+        signObject.transform.localPosition = new Vector3(0f, 2.35f, warehouseZoneSize.z * 0.5f - 0.22f);
 
         TextMeshPro sign = signObject.AddComponent<TextMeshPro>();
-        sign.text = "BACKROOM WAREHOUSE\nPlace Crates on Shelves";
-        sign.fontSize = 5f;
+        sign.text = "WAREHOUSE";
+        sign.fontSize = 2.4f;
         sign.alignment = TextAlignmentOptions.Center;
-        sign.color = Color.white;
+        sign.color = new Color(1f, 1f, 1f, 0.72f);
         sign.outlineColor = new Color(0f, 0f, 0f, 0.75f);
-        sign.outlineWidth = 0.2f;
+        sign.outlineWidth = 0.14f;
         signObject.AddComponent<BillboardToCamera>();
-    }
-
-    private void CreateBackroomDropPad()
-    {
-        GameObject zoneObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        zoneObject.name = "BackroomStoragePad";
-        zoneObject.transform.SetParent(backroomZoneRoot, false);
-        zoneObject.transform.localPosition = new Vector3(backroomDropOffPosition.x - warehouseZoneCenter.x,
-                                                         -backroomDropOffPosition.y + (backroomZoneSize.y * 0.5f),
-                                                         backroomDropOffPosition.z - warehouseZoneCenter.z);
-        zoneObject.transform.localScale = backroomZoneSize;
-
-        Collider zoneCollider = zoneObject.GetComponent<Collider>();
-        if (zoneCollider != null)
-        {
-            Destroy(zoneCollider);
-        }
-
-        MeshRenderer zoneRenderer = zoneObject.GetComponent<MeshRenderer>();
-        if (zoneRenderer != null)
-        {
-            Material zoneMaterial = gameManager.CreateRuntimeMaterial(backroomZoneColor);
-            zoneRenderer.material = zoneMaterial;
-            zoneRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            zoneRenderer.receiveShadows = false;
-        }
-
-        GameObject labelObject = new GameObject("BackroomStorageLabel");
-        labelObject.transform.SetParent(backroomZoneRoot, false);
-        labelObject.transform.localPosition = new Vector3(backroomDropOffPosition.x - warehouseZoneCenter.x,
-                                                          backroomZoneLabelOffset.y,
-                                                          backroomDropOffPosition.z - warehouseZoneCenter.z + backroomZoneLabelOffset.z);
-
-        TextMeshPro label = labelObject.AddComponent<TextMeshPro>();
-        label.text = "WAREHOUSE STORAGE\nUse Shelf Slots";
-        label.fontSize = 4f;
-        label.alignment = TextAlignmentOptions.Center;
-        label.color = Color.white;
-        label.outlineColor = new Color(0f, 0f, 0f, 0.7f);
-        label.outlineWidth = 0.15f;
-        labelObject.AddComponent<BillboardToCamera>();
     }
 
     private void CreateWarehousePanel(string objectName, Vector3 localPosition, Vector3 localScale)

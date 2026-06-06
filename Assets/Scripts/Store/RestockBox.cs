@@ -56,6 +56,14 @@ public class RestockBox : MonoBehaviour
         UpdateLabel();
     }
 
+    private void OnMouseDown()
+    {
+        if (!isBeingCarried && GameManager.Instance != null)
+        {
+            GameManager.Instance.HandleRestockBoxClicked(this);
+        }
+    }
+
     private void CreateLabel()
     {
         GameObject labelObject = new GameObject("RestockLabel");

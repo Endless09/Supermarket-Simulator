@@ -68,6 +68,8 @@ public class BasicUIManager : MonoBehaviour
     private RectTransform computerFurniturePanel;
     private RectTransform computerProductButtonPanel;
     private TMP_Text computerTitleText;
+    private TMP_Text computerStatusBarText;
+    private TMP_Text computerMessageText;
     private TMP_Text computerSelectedProductText;
     private TMP_Text computerMarketStockText;
     private TMP_Text computerFurnitureText;
@@ -79,6 +81,7 @@ public class BasicUIManager : MonoBehaviour
     private Button pauseResumeButton;
     private Button pauseSaveButton;
     private Button pauseLoadButton;
+    private Button pauseNewGameButton;
     private Button pauseSettingsButton;
     private Button pauseMainMenuButton;
     private Button pauseExitGameButton;
@@ -92,6 +95,8 @@ public class BasicUIManager : MonoBehaviour
     private Button computerBuyWarehouseShelfButton;
     private bool isPauseMenuOpen;
     private bool isComputerOpen;
+    private RectTransform activeComputerPanel;
+    private string computerMessage = "Welcome. Select an app to manage the store.";
     private float timeScaleBeforePause = 1f;
 
     public bool IsBlockingGameplayInput => isPauseMenuOpen || isComputerOpen;
@@ -188,6 +193,7 @@ public class BasicUIManager : MonoBehaviour
         if (GameManager.Instance != null)
         {
             GameManager.Instance.StartShelfPlacement();
+            SetComputerMessage("Store shelf purchased. Place it on the grid.");
         }
     }
 
@@ -196,6 +202,7 @@ public class BasicUIManager : MonoBehaviour
         if (GameManager.Instance != null)
         {
             GameManager.Instance.StartWarehouseShelfPlacement();
+            SetComputerMessage("Warehouse rack purchased. Place it in the warehouse.");
         }
     }
 
@@ -203,7 +210,10 @@ public class BasicUIManager : MonoBehaviour
     {
         if (GameManager.Instance != null && selectedProduct != null)
         {
-            GameManager.Instance.BuyProductStock(selectedProduct, restockPurchaseAmount);
+            bool ordered = GameManager.Instance.BuyProductStock(selectedProduct, restockPurchaseAmount);
+            SetComputerMessage(ordered
+                ? "Order placed: " + selectedProduct.productName + " x" + restockPurchaseAmount
+                : "Order failed. Check your cash balance.");
         }
     }
 
@@ -291,6 +301,8 @@ public class BasicUIManager : MonoBehaviour
             SyncSelectedProduct(null);
             SetSelectedShelf(null);
             UpdatePersistenceButtonStates();
+            SetPauseMenuOpen(false);
+            SetStoreComputerOpen(false);
         }
     }
 
@@ -396,53 +408,52 @@ public class BasicUIManager : MonoBehaviour
 
     private void UpdateInventoryText()
     {
-        if (inventoryText == null)
+        if (inventoryText != null && inventoryText.gameObject.activeInHierarchy)
         {
-            return;
+            if (GameManager.Instance == null || selectedProduct == null)
+            {
+                inventoryText.text = "Choose a product to see stock and deliveries.";
+            }
+            else
+            {
+                int stock = GameManager.Instance.GetBackroomStock(selectedProduct);
+                int incoming = GameManager.Instance.GetIncomingDeliveryAmount(selectedProduct);
+                int atDock = GameManager.Instance.GetDockDeliveryAmount(selectedProduct);
+                float arrivalTime = GameManager.Instance.GetSoonestDeliveryTime(selectedProduct);
+
+                string incomingLabel = incoming > 0 ? "+" + incoming : "None";
+                if (incoming > 0 && arrivalTime >= 0f)
+                {
+                    incomingLabel += " arriving in " + Mathf.CeilToInt(arrivalTime) + "s";
+                }
+
+                inventoryText.text =
+                    "Warehouse shelves: " + stock +
+                    "\nAt loading dock: " + (atDock > 0 ? "+" + atDock : "None") +
+                    "\nIncoming delivery: " + incomingLabel;
+            }
         }
-
-        if (GameManager.Instance == null || selectedProduct == null)
-        {
-            inventoryText.text = "Choose a product to see stock and deliveries.";
-            return;
-        }
-
-        int stock = GameManager.Instance.GetBackroomStock(selectedProduct);
-        int incoming = GameManager.Instance.GetIncomingDeliveryAmount(selectedProduct);
-        int atDock = GameManager.Instance.GetDockDeliveryAmount(selectedProduct);
-        float arrivalTime = GameManager.Instance.GetSoonestDeliveryTime(selectedProduct);
-
-        string incomingLabel = incoming > 0 ? "+" + incoming : "None";
-        if (incoming > 0 && arrivalTime >= 0f)
-        {
-            incomingLabel += " arriving in " + Mathf.CeilToInt(arrivalTime) + "s";
-        }
-
-        inventoryText.text =
-            "Warehouse shelves: " + stock +
-            "\nAt loading dock: " + (atDock > 0 ? "+" + atDock : "None") +
-            "\nIncoming delivery: " + incomingLabel;
 
         UpdateComputerTexts();
     }
 
     private void UpdateSelectedProductText()
     {
-        if (selectedProductText == null)
+        if (selectedProductText != null && selectedProductText.gameObject.activeInHierarchy)
         {
-            return;
-        }
+            if (selectedProduct == null)
+            {
+                selectedProductText.text = "Ordering\nNo product selected";
+            }
+            else
+            {
+                selectedProductText.text =
+                    "Ordering: " + selectedProduct.productName +
+                    "\nBuy " + restockPurchaseAmount + " for $" +
+                    (selectedProduct.wholesaleCost * restockPurchaseAmount).ToString("0.00");
+            }
 
-        if (selectedProduct == null)
-        {
-            selectedProductText.text = "Ordering\nNo product selected";
-            return;
         }
-
-        selectedProductText.text =
-            "Ordering: " + selectedProduct.productName +
-            "\nBuy " + restockPurchaseAmount + " for $" +
-            (selectedProduct.wholesaleCost * restockPurchaseAmount).ToString("0.00");
 
         UpdateComputerTexts();
     }
@@ -626,6 +637,30 @@ public class BasicUIManager : MonoBehaviour
         }
     }
 
+    private void HideLegacyProductHud()
+    {
+        if (productPanel != null)
+        {
+            productPanel.gameObject.SetActive(false);
+        }
+
+        if (productButtonPanel != null)
+        {
+            productButtonPanel.gameObject.SetActive(false);
+        }
+
+        HideLabel(inventoryText);
+        HideLabel(selectedProductText);
+    }
+
+    private void HideLabel(TMP_Text label)
+    {
+        if (label != null)
+        {
+            label.gameObject.SetActive(false);
+        }
+    }
+
     private void ConfigureHudLayout()
     {
         statusPanel = CreatePanel("StoreStatusPanel", new Vector2(0f, 1f), new Vector2(20f, -20f), new Vector2(330f, 154f), PanelColor);
@@ -633,7 +668,7 @@ public class BasicUIManager : MonoBehaviour
         shelfPanel = CreatePanel("ShelfFocusPanel", new Vector2(0f, 0f), new Vector2(20f, 20f), new Vector2(400f, 154f), PanelColor);
         taskPanel = CreatePanel("CurrentTaskPanel", new Vector2(0.5f, 0f), new Vector2(0f, 24f), new Vector2(620f, 150f), TaskPanelColor);
         actionPanel = CreatePanel("ActionPanel", new Vector2(1f, 1f), new Vector2(-20f, -20f), new Vector2(300f, 260f), PanelColor);
-        productPanel.gameObject.SetActive(false);
+        HideLegacyProductHud();
 
         AddHeading(statusPanel, "Store");
         AddHeading(shelfPanel, "Selected Shelf");
@@ -757,9 +792,10 @@ public class BasicUIManager : MonoBehaviour
         pauseResumeButton = CreatePauseButton("PauseResumeButton", "Resume", ResumeGameButton, pauseMainPanel, -72f);
         pauseSaveButton = CreatePauseButton("PauseSaveButton", "Save Game", SaveGameButton, pauseMainPanel, -124f);
         pauseLoadButton = CreatePauseButton("PauseLoadButton", "Load Game", LoadGameButton, pauseMainPanel, -176f);
-        pauseSettingsButton = CreatePauseButton("PauseSettingsButton", "Settings", SettingsButton, pauseMainPanel, -228f);
-        pauseMainMenuButton = CreatePauseButton("PauseMainMenuButton", "Main Menu (Coming Soon)", MainMenuButton, pauseMainPanel, -280f);
-        pauseExitGameButton = CreatePauseButton("PauseExitGameButton", "Exit Game", ExitGameButton, pauseMainPanel, -360f);
+        pauseNewGameButton = CreatePauseButton("PauseNewGameButton", "New Game", NewGameButton, pauseMainPanel, -228f);
+        pauseSettingsButton = CreatePauseButton("PauseSettingsButton", "Settings", SettingsButton, pauseMainPanel, -280f);
+        pauseMainMenuButton = CreatePauseButton("PauseMainMenuButton", "Main Menu (Coming Soon)", MainMenuButton, pauseMainPanel, -332f);
+        pauseExitGameButton = CreatePauseButton("PauseExitGameButton", "Exit Game", ExitGameButton, pauseMainPanel, -412f);
 
         pauseSettingsText = FindChildText(pauseSettingsPanel, "SettingsText");
         if (pauseSettingsText == null)
@@ -806,26 +842,29 @@ public class BasicUIManager : MonoBehaviour
             background = computerRoot.gameObject.AddComponent<Image>();
         }
 
-        background.color = new Color(0.74f, 0.95f, 0.82f, 0.98f);
+        background.color = new Color(0.62f, 0.9f, 0.7f, 0.98f);
         background.raycastTarget = true;
 
-        computerSidebarPanel = CreateComputerPanel("ComputerSidebar", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(250f, 0f), new Color(0.02f, 0.14f, 0.24f, 1f));
+        computerSidebarPanel = CreateComputerPanel("ComputerSidebar", new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(270f, 0f), new Color(0.02f, 0.14f, 0.24f, 1f));
         computerSidebarPanel.anchorMin = new Vector2(0f, 0f);
         computerSidebarPanel.anchorMax = new Vector2(0f, 1f);
         computerSidebarPanel.pivot = new Vector2(0f, 0.5f);
-        computerSidebarPanel.sizeDelta = new Vector2(250f, 0f);
+        computerSidebarPanel.sizeDelta = new Vector2(270f, 0f);
 
-        computerContentPanel = CreateComputerPanel("ComputerContent", new Vector2(0f, 0f), new Vector2(250f, 0f), new Vector2(-250f, 0f), new Color(0.86f, 0.94f, 0.96f, 1f));
+        computerContentPanel = CreateComputerPanel("ComputerContent", new Vector2(0f, 0f), new Vector2(270f, 0f), new Vector2(-270f, 0f), new Color(0.86f, 0.94f, 0.96f, 1f));
         computerContentPanel.anchorMin = new Vector2(0f, 0f);
         computerContentPanel.anchorMax = new Vector2(1f, 1f);
         computerContentPanel.pivot = new Vector2(0.5f, 0.5f);
-        computerContentPanel.offsetMin = new Vector2(250f, 0f);
+        computerContentPanel.offsetMin = new Vector2(270f, 0f);
         computerContentPanel.offsetMax = Vector2.zero;
 
-        computerTitleText = CreateComputerLabel("ComputerTitle", computerSidebarPanel, new Vector2(22f, -24f), new Vector2(206f, 48f), 30f, "STORE OS");
-        computerMarketTabButton = CreateComputerButton("ComputerMarketTab", "Market", ShowComputerMarket, computerSidebarPanel, new Vector2(22f, -100f), new Vector2(206f, 54f));
-        computerFurnitureTabButton = CreateComputerButton("ComputerFurnitureTab", "Furniture", ShowComputerFurniture, computerSidebarPanel, new Vector2(22f, -168f), new Vector2(206f, 54f));
-        computerCloseButton = CreateComputerButton("ComputerCloseButton", "Close", CloseStoreComputer, computerSidebarPanel, new Vector2(22f, -250f), new Vector2(206f, 54f));
+        computerTitleText = CreateComputerLabel("ComputerTitle", computerSidebarPanel, new Vector2(22f, -24f), new Vector2(226f, 56f), 32f, "STORE OS");
+        computerMarketTabButton = CreateComputerButton("ComputerMarketTab", "Market", ShowComputerMarket, computerSidebarPanel, new Vector2(22f, -110f), new Vector2(226f, 58f));
+        computerFurnitureTabButton = CreateComputerButton("ComputerFurnitureTab", "Furniture", ShowComputerFurniture, computerSidebarPanel, new Vector2(22f, -182f), new Vector2(226f, 58f));
+        computerCloseButton = CreateComputerButton("ComputerCloseButton", "Close", CloseStoreComputer, computerSidebarPanel, new Vector2(22f, -268f), new Vector2(226f, 54f));
+
+        computerStatusBarText = CreateComputerLabel("ComputerStatusBar", computerContentPanel, new Vector2(28f, -18f), new Vector2(1180f, 34f), 20f, string.Empty);
+        computerMessageText = CreateComputerLabel("ComputerMessage", computerContentPanel, new Vector2(28f, -996f), new Vector2(1180f, 44f), 21f, computerMessage);
 
         computerMarketPanel = CreateComputerContentPanel("ComputerMarketPanel");
         computerFurniturePanel = CreateComputerContentPanel("ComputerFurniturePanel");
@@ -838,9 +877,9 @@ public class BasicUIManager : MonoBehaviour
     private void BuildComputerMarketPanel()
     {
         AddHeading(computerMarketPanel, "Market - Order Stock");
-        computerSelectedProductText = CreateComputerLabel("ComputerSelectedProductText", computerMarketPanel, new Vector2(28f, -64f), new Vector2(440f, 80f), 24f, string.Empty);
-        computerMarketStockText = CreateComputerLabel("ComputerMarketStockText", computerMarketPanel, new Vector2(500f, -64f), new Vector2(480f, 92f), 22f, string.Empty);
-        computerOrderStockButton = CreateComputerButton("ComputerOrderStockButton", "Order Selected Stock", BuySelectedProductStockButton, computerMarketPanel, new Vector2(28f, -150f), new Vector2(300f, 44f));
+        computerSelectedProductText = CreateComputerLabel("ComputerSelectedProductText", computerMarketPanel, new Vector2(28f, -76f), new Vector2(420f, 118f), 23f, string.Empty);
+        computerMarketStockText = CreateComputerLabel("ComputerMarketStockText", computerMarketPanel, new Vector2(486f, -76f), new Vector2(520f, 118f), 22f, string.Empty);
+        computerOrderStockButton = CreateComputerButton("ComputerOrderStockButton", "Order Selected Stock", BuySelectedProductStockButton, computerMarketPanel, new Vector2(28f, -186f), new Vector2(300f, 46f));
 
         computerProductButtonPanel = FindDirectChildRect(computerMarketPanel, "ComputerProductButtons");
         if (computerProductButtonPanel == null)
@@ -853,7 +892,7 @@ public class BasicUIManager : MonoBehaviour
         computerProductButtonPanel.anchorMin = new Vector2(0f, 1f);
         computerProductButtonPanel.anchorMax = new Vector2(0f, 1f);
         computerProductButtonPanel.pivot = new Vector2(0f, 1f);
-        computerProductButtonPanel.anchoredPosition = new Vector2(28f, -220f);
+        computerProductButtonPanel.anchoredPosition = new Vector2(28f, -266f);
         computerProductButtonPanel.sizeDelta = new Vector2(900f, 520f);
 
         BuildComputerProductButtons();
@@ -865,12 +904,12 @@ public class BasicUIManager : MonoBehaviour
         computerFurnitureText = CreateComputerLabel(
             "ComputerFurnitureText",
             computerFurniturePanel,
-            new Vector2(28f, -72f),
-            new Vector2(820f, 150f),
+            new Vector2(28f, -82f),
+            new Vector2(880f, 150f),
             24f,
-            "Store Shelf\nUnit Price: $50.00\nAdds an empty customer-facing shelf.\n\nWarehouse Shelf\nUnit Price: $100.00\nAdds six physical box slots for delivered stock.");
-        computerBuyShelfButton = CreateComputerButton("ComputerBuyShelfButton", "Buy Store Shelf", BuyShelfButton, computerFurniturePanel, new Vector2(28f, -226f), new Vector2(260f, 46f));
-        computerBuyWarehouseShelfButton = CreateComputerButton("ComputerBuyWarehouseShelfButton", "Buy Warehouse Shelf", BuyWarehouseShelfButton, computerFurniturePanel, new Vector2(304f, -226f), new Vector2(300f, 46f));
+            "Store Shelf\nUnit Price: $50.00\nCustomer-facing shelf for products.\n\nWarehouse Rack\nUnit Price: $100.00\nHolds 4 physical stock boxes for delivered inventory.");
+        computerBuyShelfButton = CreateComputerButton("ComputerBuyShelfButton", "Buy Store Shelf", BuyShelfButton, computerFurniturePanel, new Vector2(28f, -238f), new Vector2(260f, 46f));
+        computerBuyWarehouseShelfButton = CreateComputerButton("ComputerBuyWarehouseShelfButton", "Buy Warehouse Rack", BuyWarehouseShelfButton, computerFurniturePanel, new Vector2(304f, -238f), new Vector2(300f, 46f));
     }
 
     private void BuildComputerProductButtons()
@@ -1116,6 +1155,8 @@ public class BasicUIManager : MonoBehaviour
 
     private void ShowComputerPanel(RectTransform panelToShow)
     {
+        activeComputerPanel = panelToShow;
+
         if (computerMarketPanel != null)
         {
             computerMarketPanel.gameObject.SetActive(panelToShow == computerMarketPanel);
@@ -1127,6 +1168,15 @@ public class BasicUIManager : MonoBehaviour
         }
 
         UpdateStoreComputerButtonStates();
+    }
+
+    private void SetComputerMessage(string message)
+    {
+        computerMessage = string.IsNullOrWhiteSpace(message) ? string.Empty : message;
+        if (computerMessageText != null)
+        {
+            computerMessageText.text = computerMessage;
+        }
     }
 
     private void ShowPauseSettingsPanel(bool showSettings)
@@ -1439,6 +1489,20 @@ public class BasicUIManager : MonoBehaviour
 
     private void UpdateComputerTexts()
     {
+        if (computerStatusBarText != null)
+        {
+            string cashText = moneyManager != null ? "$" + moneyManager.CurrentMoney.ToString("0.00") : "$0.00";
+            string dayTextValue = GameManager.Instance != null ? "Day " + GameManager.Instance.CurrentDay : "Day 1";
+            string timeText = GameManager.Instance != null ? GameManager.Instance.StoreClockText : "8:00 AM";
+            string stateText = GameManager.Instance != null ? GameManager.Instance.StoreStateText : "Preparing";
+            computerStatusBarText.text = cashText + "    " + dayTextValue + "    " + timeText + "    " + stateText;
+        }
+
+        if (computerMessageText != null)
+        {
+            computerMessageText.text = computerMessage;
+        }
+
         if (computerSelectedProductText == null || computerMarketStockText == null)
         {
             return;
@@ -1457,12 +1521,12 @@ public class BasicUIManager : MonoBehaviour
         float orderCost = selectedProduct.wholesaleCost * restockPurchaseAmount;
 
         computerSelectedProductText.text =
-            selectedProduct.productName +
+            "Selected Product\n" + selectedProduct.productName +
             "\nOrder amount: " + restockPurchaseAmount +
             "\nOrder cost: $" + orderCost.ToString("0.00");
 
         computerMarketStockText.text =
-            "Warehouse shelf stock: " + stock +
+            "Inventory Status\nWarehouse shelf stock: " + stock +
             "\nAt loading dock: " + (atDock > 0 ? "+" + atDock : "None") +
             "\nIncoming delivery: " + (incoming > 0 ? "+" + incoming : "None");
     }
@@ -1500,6 +1564,34 @@ public class BasicUIManager : MonoBehaviour
         SetButtonState(computerBuyWarehouseShelfButton, canPlaceShelf);
         UpdateComputerTexts();
         UpdateComputerProductButtonVisuals();
+        UpdateComputerTabVisuals();
+    }
+
+    private void UpdateComputerTabVisuals()
+    {
+        SetComputerTabVisual(computerMarketTabButton, activeComputerPanel == computerMarketPanel);
+        SetComputerTabVisual(computerFurnitureTabButton, activeComputerPanel == computerFurniturePanel);
+    }
+
+    private void SetComputerTabVisual(Button button, bool isActive)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        Image image = button.GetComponent<Image>();
+        if (image != null)
+        {
+            image.color = isActive ? SelectedProductColor : ButtonColor;
+        }
+
+        TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
+        if (label != null)
+        {
+            label.color = DarkTextColor;
+            label.fontStyle = isActive ? FontStyles.Bold : FontStyles.Normal;
+        }
     }
 
     private void UpdatePauseMenuButtonStates()
@@ -1515,6 +1607,7 @@ public class BasicUIManager : MonoBehaviour
         SetButtonState(pauseResumeButton, true);
         SetButtonState(pauseSaveButton, canSave);
         SetButtonState(pauseLoadButton, hasSave);
+        SetButtonState(pauseNewGameButton, true);
         SetButtonState(pauseSettingsButton, true);
         SetButtonState(pauseMainMenuButton, false);
         SetButtonState(pauseExitGameButton, true);
@@ -1599,11 +1692,6 @@ public class BasicUIManager : MonoBehaviour
 
     private TMP_Text GetAnyExistingLabel()
     {
-        if (selectedProductText != null)
-        {
-            return selectedProductText;
-        }
-
         if (moneyText != null)
         {
             return moneyText;
@@ -1612,6 +1700,11 @@ public class BasicUIManager : MonoBehaviour
         if (dayText != null)
         {
             return dayText;
+        }
+
+        if (selectedProductText != null)
+        {
+            return selectedProductText;
         }
 
         if (inventoryText != null)

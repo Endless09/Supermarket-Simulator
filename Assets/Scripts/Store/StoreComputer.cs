@@ -6,12 +6,15 @@ using UnityEngine;
 /// </summary>
 public class StoreComputer : MonoBehaviour
 {
-    [SerializeField] private Vector3 computerPosition = new Vector3(3.5f, 0f, -5.5f);
+    [SerializeField] private Vector3 computerPosition = new Vector3(4f, 0f, -4f);
+    [SerializeField] private Vector3 computerEulerAngles = new Vector3(0f, 180f, 0f);
 
     private TextMeshPro label;
 
     private void Awake()
     {
+        ApplyPrototypeTransform();
+
         if (transform.childCount == 0)
         {
             BuildPrototypeComputer();
@@ -38,7 +41,7 @@ public class StoreComputer : MonoBehaviour
 
     private void BuildPrototypeComputer()
     {
-        transform.position = computerPosition;
+        ApplyPrototypeTransform();
         gameObject.name = "StoreComputer";
 
         CreatePart("ComputerDesk", new Vector3(0f, 0.45f, 0f), new Vector3(2.2f, 0.12f, 1.1f), new Color(0.72f, 0.72f, 0.68f, 1f));
@@ -58,6 +61,12 @@ public class StoreComputer : MonoBehaviour
         label.outlineColor = new Color(0f, 0f, 0f, 0.8f);
         label.outlineWidth = 0.18f;
         labelObject.AddComponent<BillboardToCamera>();
+    }
+
+    private void ApplyPrototypeTransform()
+    {
+        transform.position = computerPosition;
+        transform.rotation = Quaternion.Euler(computerEulerAngles);
     }
 
     private void CreatePart(string partName, Vector3 localPosition, Vector3 localScale, Color color)

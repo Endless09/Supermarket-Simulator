@@ -14,15 +14,13 @@ public class WarehouseShelf : MonoBehaviour
         public int amount;
     }
 
-    private const int DefaultSlotCount = 6;
+    private const int DefaultSlotCount = 4;
     private static readonly Vector3[] DefaultSlotPositions =
     {
-        new Vector3(-0.35f, 0.35f, 0.05f),
-        new Vector3(0.35f, 0.35f, 0.05f),
-        new Vector3(-0.35f, 0.95f, 0.05f),
-        new Vector3(0.35f, 0.95f, 0.05f),
-        new Vector3(-0.35f, 1.55f, 0.05f),
-        new Vector3(0.35f, 1.55f, 0.05f)
+        new Vector3(-0.28f, 0.27f, 0f),
+        new Vector3(0.28f, 0.27f, 0f),
+        new Vector3(-0.28f, 0.78f, 0f),
+        new Vector3(0.28f, 0.78f, 0f)
     };
 
     private readonly SlotState[] slots = new SlotState[DefaultSlotCount];
@@ -222,15 +220,22 @@ public class WarehouseShelf : MonoBehaviour
             {
                 if (loadedSlot == null ||
                     loadedSlot.slotIndex < 0 ||
-                    loadedSlot.slotIndex >= slots.Length ||
                     loadedSlot.product == null ||
                     loadedSlot.amount <= 0)
                 {
                     continue;
                 }
 
-                slots[loadedSlot.slotIndex].product = loadedSlot.product;
-                slots[loadedSlot.slotIndex].amount = loadedSlot.amount;
+                int targetSlotIndex = loadedSlot.slotIndex < slots.Length && slots[loadedSlot.slotIndex].product == null
+                    ? loadedSlot.slotIndex
+                    : FindFirstEmptySlot();
+                if (targetSlotIndex < 0)
+                {
+                    continue;
+                }
+
+                slots[targetSlotIndex].product = loadedSlot.product;
+                slots[targetSlotIndex].amount = loadedSlot.amount;
 
                 if (lockedProduct == null)
                 {
@@ -246,6 +251,11 @@ public class WarehouseShelf : MonoBehaviour
     {
         if (GameManager.Instance != null)
         {
+            if (GameManager.Instance.IsCarryingRestockBox || GameManager.Instance.IsCarryingDeliveryCrate())
+            {
+                return;
+            }
+
             GameManager.Instance.HandleWarehouseShelfClicked(this);
         }
     }
@@ -266,6 +276,19 @@ public class WarehouseShelf : MonoBehaviour
         for (int index = 0; index < slots.Length; index++)
         {
             if (slots[index].product != null)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private int FindFirstEmptySlot()
+    {
+        for (int index = 0; index < slots.Length; index++)
+        {
+            if (slots[index].product == null)
             {
                 return index;
             }
@@ -374,10 +397,10 @@ public class WarehouseShelf : MonoBehaviour
 
         GameObject labelObject = new GameObject("WarehouseShelfLabel");
         labelObject.transform.SetParent(transform, false);
-        labelObject.transform.localPosition = new Vector3(0f, 2.25f, 0f);
+        labelObject.transform.localPosition = new Vector3(0f, 1.62f, -0.48f);
 
         label = labelObject.AddComponent<TextMeshPro>();
-        label.fontSize = 3f;
+        label.fontSize = 1.45f;
         label.alignment = TextAlignmentOptions.Center;
         label.color = Color.white;
         label.outlineColor = new Color(0f, 0f, 0f, 0.85f);
@@ -409,7 +432,7 @@ public class WarehouseShelf : MonoBehaviour
             boxObject.name = slot.product.productName + "_WarehouseSlotBox";
             boxObject.transform.SetParent(transform, false);
             boxObject.transform.localPosition = DefaultSlotPositions[index];
-            boxObject.transform.localScale = new Vector3(0.42f, 0.32f, 0.42f);
+            boxObject.transform.localScale = new Vector3(0.36f, 0.24f, 0.36f);
 
             Collider collider = boxObject.GetComponent<Collider>();
             if (collider != null)
@@ -438,8 +461,8 @@ public class WarehouseShelf : MonoBehaviour
             return;
         }
 
-        string productName = lockedProduct != null ? lockedProduct.productName : "Unlocked";
-        label.text = "Warehouse Shelf\n" + productName + "\nBoxes " + GetOccupiedSlotCount() + "/" + slots.Length;
+        string productName = lockedProduct != null ? lockedProduct.productName : "Empty Rack";
+        label.text = productName + "\n" + GetOccupiedSlotCount() + "/" + slots.Length + " boxes";
         label.color = lockedProduct != null ? ProductVisualUtility.GetProductColor(lockedProduct, Color.white) : Color.white;
     }
 }

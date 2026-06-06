@@ -1,9 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using Unity.AI.Navigation;
 using UnityEngine;
-using UnityEngine.AI;
 
 /// <summary>
 /// Main game coordinator for the prototype.
@@ -49,8 +47,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float heldObjectSideOffset = 0.6f;
     [SerializeField] private float heldObjectVerticalOffset = 0.15f;
 
-    private readonly Dictionary<ProductData, int> backroomInventory = new Dictionary<ProductData, int>();
-    private readonly Dictionary<string, ProductData> knownProductsByName = new Dictionary<string, ProductData>(StringComparer.OrdinalIgnoreCase);
+    private readonly ProductInventoryManager productInventory = new ProductInventoryManager();
     private readonly List<RestockBox> activeRestockBoxes = new List<RestockBox>();
     private const string CustomersStillInsideWarning = "Customers are still inside. Press Next Day again to continue anyway.";
 
@@ -67,9 +64,6 @@ public class GameManager : MonoBehaviour
     private ProductData initialDefaultShelfProduct;
     private RestockBox carriedRestockBox;
     private EmptyBox carriedEmptyBox;
-    private Shader cachedSurfaceShader;
-    private NavMeshSurface storeNavMeshSurface;
-    private bool navMeshRebuildQueued;
     private DeliveryManager deliveryManager;
     private PlayerInteractionManager playerInteractionManager;
     private GameSaveSystem saveSystem;
@@ -78,6 +72,7 @@ public class GameManager : MonoBehaviour
     private TrashManager trashManager;
     private StoreComputer storeComputer;
     private DayNightCycle dayNightCycle;
+    private RuntimeSceneManager runtimeSceneManager;
     private bool isStateDirty;
     private bool nextDayCustomerWarningPending;
 
@@ -103,7 +98,7 @@ public class GameManager : MonoBehaviour
         EnsureWarehouseManager();
         EnsureTrashManager();
         EnsureStoreComputer();
-        EnsureStoreNavigation();
+        EnsureRuntimeSceneManager();
 
         BuildStartingInventory();
         MigrateBackroomInventoryToWarehouseShelves();
@@ -134,7 +129,7 @@ public class GameManager : MonoBehaviour
 
             if (GetRightMouseButtonDown())
             {
-                CancelCarriedRestockBox();
+                ThrowCarriedRestockBox();
             }
 
             return;
@@ -155,19 +150,6 @@ public class GameManager : MonoBehaviour
         if (deliveryManager != null && deliveryManager.IsCarryingCrate)
         {
             deliveryManager.UpdateCarriedCratePosition();
-
-            if (GetLeftMouseButtonDown())
-            {
-                bool isInsideDropZone = false;
-                EnsureWarehouseManager();
-                if (warehouseManager != null &&
-                    TryGetPlacementPositionFromMouse(out Vector3 placementPosition))
-                {
-                    isInsideDropZone = warehouseManager.IsPointInsideDropZone(placementPosition);
-                }
-
-                deliveryManager.TryUnloadCarriedCrateAtDropZone(isInsideDropZone);
-            }
 
             if (GetRightMouseButtonDown())
             {
@@ -291,12 +273,7 @@ public class GameManager : MonoBehaviour
             physicalStock = warehouseManager.GetStoredAmount(product);
         }
 
-        if (backroomInventory.TryGetValue(product, out int amount))
-        {
-            return physicalStock + amount;
-        }
-
-        return physicalStock;
+        return physicalStock + productInventory.GetLegacyBackroomStock(product);
     }
 
     public bool TakeFromBackroom(ProductData product, int amount)
@@ -333,14 +310,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        RegisterKnownProduct(product);
-
-        if (!backroomInventory.ContainsKey(product))
-        {
-            backroomInventory.Add(product, 0);
-        }
-
-        backroomInventory[product] += amount;
+        productInventory.AddToBackroom(product, amount);
     }
 
     public void SetDefaultShelfProduct(ProductData product)
@@ -352,25 +322,12 @@ public class GameManager : MonoBehaviour
 
     public void RegisterKnownProducts(IEnumerable<ProductData> products)
     {
-        if (products == null)
-        {
-            return;
-        }
-
-        foreach (ProductData product in products)
-        {
-            RegisterKnownProduct(product);
-        }
+        productInventory.RegisterKnownProducts(products);
     }
 
     public void RegisterKnownProduct(ProductData product)
     {
-        if (product == null || string.IsNullOrWhiteSpace(product.productName))
-        {
-            return;
-        }
-
-        knownProductsByName[product.productName] = product;
+        productInventory.RegisterKnownProduct(product);
     }
 
     public void NotifyStateChanged()
@@ -465,7 +422,7 @@ public class GameManager : MonoBehaviour
         if (carriedRestockBox != null && carriedRestockBox.Product != null)
         {
             return "Carrying stock: " + carriedRestockBox.Product.productName + " x" + carriedRestockBox.Amount +
-                   "\nStock a store shelf or return it to warehouse storage";
+                   "\nUse [E] to stock/place it, or right click to throw it down.";
         }
 
         if (carriedEmptyBox != null)
@@ -530,17 +487,7 @@ public class GameManager : MonoBehaviour
 
     private void BuildStartingInventory()
     {
-        backroomInventory.Clear();
-
-        foreach (ProductInventoryEntry entry in startingInventory)
-        {
-            if (entry.product == null)
-            {
-                continue;
-            }
-
-            AddToBackroom(entry.product, entry.amount);
-        }
+        productInventory.BuildStartingInventory(startingInventory);
     }
 
     private void RegisterKnownProductsFromInitialData()
@@ -585,13 +532,8 @@ public class GameManager : MonoBehaviour
 
     private void MigrateBackroomInventoryToWarehouseShelves()
     {
-        if (backroomInventory.Count == 0)
-        {
-            return;
-        }
-
         EnsureWarehouseManager();
-        warehouseManager?.MigrateLegacyBackroomInventory(backroomInventory);
+        productInventory.MigrateLegacyBackroomInventory(warehouseManager);
     }
 
     public void HandleWarehouseStockBoxClicked(WarehouseStockBox stockBox)
@@ -701,6 +643,29 @@ public class GameManager : MonoBehaviour
         SpawnRestockBox(product, amount, position, true);
     }
 
+    public void HandleRestockBoxClicked(RestockBox restockBox)
+    {
+        if (restockBox == null ||
+            restockBox == carriedRestockBox ||
+            carriedRestockBox != null ||
+            carriedEmptyBox != null ||
+            IsPlacingShelf ||
+            (deliveryManager != null && deliveryManager.IsCarryingCrate))
+        {
+            return;
+        }
+
+        if (!activeRestockBoxes.Contains(restockBox))
+        {
+            activeRestockBoxes.Add(restockBox);
+        }
+
+        carriedRestockBox = restockBox;
+        carriedRestockBox.SetCarriedState(true);
+        UpdateCarriedRestockBoxPosition();
+        NotifyStateChanged();
+    }
+
     private void UpdateCarriedRestockBoxPosition()
     {
         if (carriedRestockBox == null)
@@ -778,6 +743,34 @@ public class GameManager : MonoBehaviour
 
         activeRestockBoxes.Remove(carriedRestockBox);
         Destroy(carriedRestockBox.gameObject);
+        carriedRestockBox = null;
+        NotifyStateChanged();
+    }
+
+    private void ThrowCarriedRestockBox()
+    {
+        if (carriedRestockBox == null)
+        {
+            return;
+        }
+
+        Vector3 dropPosition = carriedRestockBox.transform.position;
+        if (TryGetPlacementPositionFromMouse(out Vector3 pointerPosition))
+        {
+            dropPosition = pointerPosition;
+        }
+        else if (mainCamera != null)
+        {
+            Vector3 forward = Vector3.ProjectOnPlane(mainCamera.transform.forward, Vector3.up).normalized;
+            if (forward.sqrMagnitude > 0.01f)
+            {
+                dropPosition = mainCamera.transform.position + forward * 1.4f;
+            }
+        }
+
+        dropPosition.y = 0.24f;
+        carriedRestockBox.transform.position = dropPosition;
+        carriedRestockBox.SetCarriedState(false);
         carriedRestockBox = null;
         NotifyStateChanged();
     }
@@ -901,18 +894,14 @@ public class GameManager : MonoBehaviour
             return false;
         }
 
-        EnsureWarehouseManager();
-        Vector3 pickupPosition = warehouseManager != null
-            ? warehouseManager.BackroomDropOffPosition + carriedCrateOffset
-            : carriedCrateOffset;
-        SpawnRestockBox(stockBox.Product, amountToCarry, pickupPosition, true);
+        SpawnRestockBox(stockBox.Product, amountToCarry, GetHeldObjectPosition(), true);
         NotifyStateChanged();
         return true;
     }
 
     public IEnumerable<ProductData> GetKnownProducts()
     {
-        return knownProductsByName.Values;
+        return productInventory.GetKnownProducts();
     }
 
     public Vector3 GetHeldObjectPosition()
@@ -938,36 +927,10 @@ public class GameManager : MonoBehaviour
 
     public Material CreateRuntimeMaterial(Color color)
     {
-        Shader shader = GetRuntimeSurfaceShader();
-        Material material = shader != null ? new Material(shader) : new Material(Shader.Find("Standard"));
-        material.color = color;
-        return material;
-    }
-
-    private Shader GetRuntimeSurfaceShader()
-    {
-        if (cachedSurfaceShader != null)
-        {
-            return cachedSurfaceShader;
-        }
-
-        string[] shaderNames =
-        {
-            "Universal Render Pipeline/Lit",
-            "Standard"
-        };
-
-        foreach (string shaderName in shaderNames)
-        {
-            Shader shader = Shader.Find(shaderName);
-            if (shader != null)
-            {
-                cachedSurfaceShader = shader;
-                return cachedSurfaceShader;
-            }
-        }
-
-        return null;
+        EnsureRuntimeSceneManager();
+        return runtimeSceneManager != null
+            ? runtimeSceneManager.CreateRuntimeMaterial(color)
+            : new Material(Shader.Find("Standard")) { color = color };
     }
 
 
@@ -1038,7 +1001,7 @@ public class GameManager : MonoBehaviour
                 }
             }
 
-            backroomInventory.Clear();
+            productInventory.ClearBackroomInventory();
             EnsureDeliveryManager();
             if (deliveryManager != null)
             {
@@ -1097,7 +1060,7 @@ public class GameManager : MonoBehaviour
 
         MigrateBackroomInventoryToWarehouseShelves();
 
-        foreach (KeyValuePair<ProductData, int> entry in backroomInventory)
+        foreach (KeyValuePair<ProductData, int> entry in productInventory.GetBackroomEntries())
         {
             if (entry.Key == null)
             {
@@ -1167,7 +1130,7 @@ public class GameManager : MonoBehaviour
         {
             CancelShelfPlacement();
 
-            backroomInventory.Clear();
+            productInventory.ClearBackroomInventory();
             EnsureDeliveryManager();
             if (deliveryManager != null)
             {
@@ -1314,37 +1277,7 @@ public class GameManager : MonoBehaviour
 
     private ProductData ResolveProductByName(string productName)
     {
-        if (string.IsNullOrWhiteSpace(productName))
-        {
-            return null;
-        }
-
-        if (knownProductsByName.TryGetValue(productName, out ProductData knownProduct))
-        {
-            return knownProduct;
-        }
-
-        foreach (KeyValuePair<ProductData, int> entry in backroomInventory)
-        {
-            if (entry.Key != null && string.Equals(entry.Key.productName, productName, StringComparison.OrdinalIgnoreCase))
-            {
-                RegisterKnownProduct(entry.Key);
-                return entry.Key;
-            }
-        }
-
-        Shelf[] shelves = FindObjectsByType<Shelf>();
-        foreach (Shelf shelf in shelves)
-        {
-            if (shelf != null && shelf.AssignedProduct != null &&
-                string.Equals(shelf.AssignedProduct.productName, productName, StringComparison.OrdinalIgnoreCase))
-            {
-                RegisterKnownProduct(shelf.AssignedProduct);
-                return shelf.AssignedProduct;
-            }
-        }
-
-        return null;
+        return productInventory.ResolveProductByName(productName);
     }
 
     private void OnApplicationQuit()
@@ -1549,51 +1482,25 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private void EnsureStoreNavigation()
+    private void EnsureRuntimeSceneManager()
     {
-        if (storeNavMeshSurface != null)
+        if (runtimeSceneManager != null)
         {
             return;
         }
 
-        GameObject floorObject = GameObject.Find("Floor");
-        if (floorObject == null)
+        runtimeSceneManager = GetComponent<RuntimeSceneManager>();
+        if (runtimeSceneManager == null)
         {
-            return;
+            runtimeSceneManager = gameObject.AddComponent<RuntimeSceneManager>();
         }
 
-        storeNavMeshSurface = floorObject.GetComponent<NavMeshSurface>();
-        if (storeNavMeshSurface == null)
-        {
-            storeNavMeshSurface = floorObject.AddComponent<NavMeshSurface>();
-        }
-
-        storeNavMeshSurface.collectObjects = CollectObjects.All;
-        storeNavMeshSurface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
-        storeNavMeshSurface.layerMask = ~0;
-        storeNavMeshSurface.agentTypeID = 0;
+        runtimeSceneManager.Initialize();
     }
 
     public void QueueStoreNavigationRebuild()
     {
-        EnsureStoreNavigation();
-        if (storeNavMeshSurface == null || navMeshRebuildQueued)
-        {
-            return;
-        }
-
-        navMeshRebuildQueued = true;
-        StartCoroutine(RebuildStoreNavigationAtEndOfFrame());
-    }
-
-    private IEnumerator RebuildStoreNavigationAtEndOfFrame()
-    {
-        yield return new WaitForEndOfFrame();
-        navMeshRebuildQueued = false;
-
-        if (storeNavMeshSurface != null)
-        {
-            storeNavMeshSurface.BuildNavMesh();
-        }
+        EnsureRuntimeSceneManager();
+        runtimeSceneManager?.QueueStoreNavigationRebuild();
     }
 }

@@ -67,7 +67,7 @@ public class PlayerInteractionManager : MonoBehaviour
 
             if (gameManager.IsCarryingRestockBox)
             {
-                return "Look at a store shelf to stock it, or a warehouse shelf to return it";
+                return "Look at a store shelf or warehouse rack and press [E]. Right click throws the box down.";
             }
 
             return string.Empty;
