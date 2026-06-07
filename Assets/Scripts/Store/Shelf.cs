@@ -15,6 +15,7 @@ public class Shelf : MonoBehaviour
     [Header("Optional Visuals")]
     [SerializeField] private TMP_Text stockText;
     [SerializeField] private MeshRenderer shelfRenderer;
+    [SerializeField] private ShelfProductDisplay productDisplay;
     [SerializeField] private Color emptyColor = new Color(0.86f, 0.86f, 0.86f, 1f);
     [SerializeField] private Color selectedColor = new Color(1f, 0.92f, 0.2f, 1f);
     [SerializeField] private Vector3 labelOffset = new Vector3(0f, 0.85f, 0f);
@@ -205,6 +206,7 @@ public class Shelf : MonoBehaviour
             : Color.white;
 
         ApplySelectionVisual(isSelected);
+        RefreshProductDisplay(productLabel);
     }
 
     public void LoadState(ProductData product, int stock)
@@ -289,5 +291,24 @@ public class Shelf : MonoBehaviour
         labelObject.AddComponent<BillboardToCamera>();
 
         stockText = label;
+    }
+
+    private void RefreshProductDisplay(string productLabel)
+    {
+        if (productDisplay == null)
+        {
+            productDisplay = GetComponentInChildren<ShelfProductDisplay>();
+        }
+
+        if (productDisplay == null)
+        {
+            productDisplay = gameObject.AddComponent<ShelfProductDisplay>();
+        }
+
+        float salePrice = assignedProduct != null && GameManager.Instance != null
+            ? GameManager.Instance.GetProductSalePrice(assignedProduct)
+            : 0f;
+
+        productDisplay.Refresh(assignedProduct, CurrentStock, maxCapacity, salePrice, productLabel);
     }
 }

@@ -27,6 +27,7 @@ public class Customer : MonoBehaviour
     [SerializeField] private float shelfApproachDistance = 0.9f;
     [SerializeField] private float expensivePriceMultiplier = 1.5f;
     [SerializeField] private float overpricedRefusalMultiplier = 2f;
+    [SerializeField] private float thoughtBubbleDuration = 2.25f;
 
     private CheckoutRegister checkoutRegister;
     private Transform exitPoint;
@@ -46,6 +47,8 @@ public class Customer : MonoBehaviour
     private bool hasReportedTripFeedback;
     private bool hasJoinedCheckoutQueue;
     private TextMeshPro statusLabel;
+    private TextMeshPro thoughtBubbleLabel;
+    private float thoughtBubbleTimer;
 
     private void Awake()
     {
@@ -99,6 +102,8 @@ public class Customer : MonoBehaviour
 
     private void Update()
     {
+        UpdateThoughtBubbleTimer();
+
         switch (currentState)
         {
             case CustomerState.Shopping:
@@ -140,6 +145,7 @@ public class Customer : MonoBehaviour
             {
                 isBrowsingShelf = true;
                 shelfBrowseTimer = shelfBrowseTime;
+                ShowThoughtBubble("Looking for " + GetProductName(shoppingList[currentShoppingIndex]));
                 if (navMeshAgent != null)
                 {
                     navMeshAgent.isStopped = true;
@@ -157,14 +163,17 @@ public class Customer : MonoBehaviour
             if (ShouldRefuseShelfPrice(targetShelf, desiredProduct))
             {
                 AddTooExpensiveProduct(desiredProduct);
+                ShowThoughtBubble(GetProductName(desiredProduct) + " is too expensive");
             }
             else if (targetShelf.TryTakeOneItem())
             {
                 carriedProducts.Add(targetShelf.AssignedProduct);
+                ShowThoughtBubble("Got " + GetProductName(targetShelf.AssignedProduct));
             }
             else
             {
                 AddMissingProduct(shoppingList[currentShoppingIndex]);
+                ShowThoughtBubble("No " + GetProductName(shoppingList[currentShoppingIndex]) + " here");
             }
 
             UpdateStatusLabel();
@@ -215,6 +224,7 @@ public class Customer : MonoBehaviour
 
             currentState = CustomerState.CheckingOut;
             checkoutTimer = checkoutDuration;
+            ShowThoughtBubble("Checking out");
             if (navMeshAgent != null)
             {
                 navMeshAgent.isStopped = true;
@@ -331,6 +341,7 @@ public class Customer : MonoBehaviour
             hasJoinedCheckoutQueue = true;
             SetDestination(checkoutRegister.GetQueuePosition(this));
             repathTimer = repathInterval;
+            ShowThoughtBubble(GetCheckoutThought());
         }
         else
         {
@@ -340,6 +351,8 @@ public class Customer : MonoBehaviour
             {
                 SetDestination(exitPoint.position);
             }
+
+            ShowThoughtBubble("Leaving");
         }
 
         UpdateStatusLabel();
@@ -494,7 +507,9 @@ public class Customer : MonoBehaviour
     {
         if (currentShoppingIndex >= 0 && currentShoppingIndex < shoppingList.Count)
         {
-            AddMissingProduct(shoppingList[currentShoppingIndex]);
+            ProductData missingProduct = shoppingList[currentShoppingIndex];
+            AddMissingProduct(missingProduct);
+            ShowThoughtBubble("Can't find " + GetProductName(missingProduct));
         }
     }
 
@@ -516,6 +531,78 @@ public class Customer : MonoBehaviour
         statusLabel.outlineColor = new Color(0f, 0f, 0f, 0.85f);
         statusLabel.outlineWidth = 0.16f;
         labelObject.AddComponent<BillboardToCamera>();
+    }
+
+    private void EnsureThoughtBubble()
+    {
+        if (thoughtBubbleLabel != null)
+        {
+            return;
+        }
+
+        GameObject bubbleObject = new GameObject("CustomerThoughtBubble");
+        bubbleObject.transform.SetParent(transform, false);
+        bubbleObject.transform.localPosition = new Vector3(0f, 2.72f, 0f);
+
+        thoughtBubbleLabel = bubbleObject.AddComponent<TextMeshPro>();
+        thoughtBubbleLabel.fontSize = 1.55f;
+        thoughtBubbleLabel.alignment = TextAlignmentOptions.Center;
+        thoughtBubbleLabel.color = new Color(1f, 0.95f, 0.62f, 1f);
+        thoughtBubbleLabel.outlineColor = new Color(0f, 0f, 0f, 0.9f);
+        thoughtBubbleLabel.outlineWidth = 0.18f;
+        thoughtBubbleLabel.text = string.Empty;
+        bubbleObject.SetActive(false);
+        bubbleObject.AddComponent<BillboardToCamera>();
+    }
+
+    private void ShowThoughtBubble(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        EnsureThoughtBubble();
+        if (thoughtBubbleLabel == null)
+        {
+            return;
+        }
+
+        thoughtBubbleLabel.text = message;
+        thoughtBubbleLabel.gameObject.SetActive(true);
+        thoughtBubbleTimer = thoughtBubbleDuration;
+    }
+
+    private void UpdateThoughtBubbleTimer()
+    {
+        if (thoughtBubbleLabel == null || !thoughtBubbleLabel.gameObject.activeSelf)
+        {
+            return;
+        }
+
+        thoughtBubbleTimer -= Time.deltaTime;
+        if (thoughtBubbleTimer > 0f)
+        {
+            return;
+        }
+
+        thoughtBubbleLabel.text = string.Empty;
+        thoughtBubbleLabel.gameObject.SetActive(false);
+    }
+
+    private string GetCheckoutThought()
+    {
+        if (tooExpensiveProducts.Count > 0)
+        {
+            return "That price was too high";
+        }
+
+        if (missingProducts.Count > 0)
+        {
+            return "Couldn't find everything";
+        }
+
+        return carriedProducts.Count > 0 ? "Ready to pay" : "Nothing to buy";
     }
 
     private void UpdateStatusLabel()
@@ -585,5 +672,12 @@ public class Customer : MonoBehaviour
 
             builder.Append(products[index] != null ? products[index].productName : "Unknown");
         }
+    }
+
+    private string GetProductName(ProductData product)
+    {
+        return product != null && !string.IsNullOrWhiteSpace(product.productName)
+            ? product.productName
+            : "item";
     }
 }

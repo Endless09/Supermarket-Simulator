@@ -79,6 +79,10 @@ public class GameManager : MonoBehaviour
     private int dailyItemsSold;
     private int dailyMissingItems;
     private int dailyTooExpensiveItems;
+    private int dailyCustomerTrips;
+    private float dailySalesRevenue;
+    private float dailyWholesaleCostOfGoods;
+    private float dailyProductOrderCosts;
 
     private void Awake()
     {
@@ -263,6 +267,17 @@ public class GameManager : MonoBehaviour
         SaveGame();
     }
 
+    public void SkipToClosingTimeForTesting()
+    {
+        EnsureDayNightCycle();
+        if (dayNightCycle == null)
+        {
+            return;
+        }
+
+        dayNightCycle.SkipToClosingTime();
+    }
+
     public int GetBackroomStock(ProductData product)
     {
         if (product == null)
@@ -298,6 +313,7 @@ public class GameManager : MonoBehaviour
             return false;
         }
 
+        dailyProductOrderCosts += totalCost;
         EnsureDeliveryManager();
         if (deliveryManager != null)
         {
@@ -362,11 +378,15 @@ public class GameManager : MonoBehaviour
         }
 
         dailyItemsSold++;
+        float salePrice = productPricing.GetSalePrice(product);
+        dailySalesRevenue += salePrice;
+        dailyWholesaleCostOfGoods += Mathf.Max(0f, product.wholesaleCost);
         NotifyStateChanged();
     }
 
     public void RecordCustomerShoppingFeedback(int missingItemCount, int tooExpensiveItemCount)
     {
+        dailyCustomerTrips++;
         dailyMissingItems += Mathf.Max(0, missingItemCount);
         dailyTooExpensiveItems += Mathf.Max(0, tooExpensiveItemCount);
         NotifyStateChanged();
@@ -379,6 +399,56 @@ public class GameManager : MonoBehaviour
                "\nCould not find: " + dailyMissingItems +
                "\nToo expensive: " + dailyTooExpensiveItems;
     }
+
+    public string GetEndOfDayReportText()
+    {
+        float grossProfit = dailySalesRevenue - dailyWholesaleCostOfGoods;
+        float netProfit = grossProfit - dailyProductOrderCosts;
+
+        return "END OF DAY REPORT - DAY " + CurrentDay +
+               "\nPerformance: " + GetDailyPerformanceSummary(netProfit) +
+               "\n\nSales: $" + dailySalesRevenue.ToString("0.00") +
+               "\nProduct costs: $" + dailyWholesaleCostOfGoods.ToString("0.00") +
+               "\nStock ordered: $" + dailyProductOrderCosts.ToString("0.00") +
+               "\nProfit: $" + netProfit.ToString("0.00") +
+               "\n\nCustomers: " + dailyCustomerTrips +
+               "\nItems sold: " + dailyItemsSold +
+               "\nToo expensive: " + dailyTooExpensiveItems +
+               "\nCould not find: " + dailyMissingItems;
+    }
+
+    private string GetDailyPerformanceSummary(float netProfit)
+    {
+        if (dailyCustomerTrips <= 0)
+        {
+            return "No customer traffic yet";
+        }
+
+        if (dailyTooExpensiveItems > dailyItemsSold)
+        {
+            return "Prices felt too high";
+        }
+
+        if (dailyMissingItems > dailyItemsSold)
+        {
+            return "Low stock hurt sales";
+        }
+
+        if (netProfit > 0f && dailyItemsSold >= dailyCustomerTrips)
+        {
+            return "Great day";
+        }
+
+        if (netProfit > 0f)
+        {
+            return "Profitable day";
+        }
+
+        return "Needs improvement";
+    }
+
+    public bool ShouldShowEndOfDayReport => dayNightCycle != null &&
+                                            dayNightCycle.CurrentPhase == DayNightCycle.DayPhase.AfterClose;
 
     public void NotifyStateChanged()
     {
@@ -1119,7 +1189,11 @@ public class GameManager : MonoBehaviour
             isStoreOpen = dayNightCycle == null || dayNightCycle.IsStoreOpen,
             dailyItemsSold = dailyItemsSold,
             dailyMissingItems = dailyMissingItems,
-            dailyTooExpensiveItems = dailyTooExpensiveItems
+            dailyTooExpensiveItems = dailyTooExpensiveItems,
+            dailyCustomerTrips = dailyCustomerTrips,
+            dailySalesRevenue = dailySalesRevenue,
+            dailyWholesaleCostOfGoods = dailyWholesaleCostOfGoods,
+            dailyProductOrderCosts = dailyProductOrderCosts
         };
 
         MigrateBackroomInventoryToWarehouseShelves();
@@ -1210,6 +1284,10 @@ public class GameManager : MonoBehaviour
             dailyItemsSold = Mathf.Max(0, saveData.dailyItemsSold);
             dailyMissingItems = Mathf.Max(0, saveData.dailyMissingItems);
             dailyTooExpensiveItems = Mathf.Max(0, saveData.dailyTooExpensiveItems);
+            dailyCustomerTrips = Mathf.Max(0, saveData.dailyCustomerTrips);
+            dailySalesRevenue = Mathf.Max(0f, saveData.dailySalesRevenue);
+            dailyWholesaleCostOfGoods = Mathf.Max(0f, saveData.dailyWholesaleCostOfGoods);
+            dailyProductOrderCosts = Mathf.Max(0f, saveData.dailyProductOrderCosts);
             EnsureDayNightCycle();
             if (dayNightCycle != null)
             {
@@ -1389,6 +1467,10 @@ public class GameManager : MonoBehaviour
         dailyItemsSold = 0;
         dailyMissingItems = 0;
         dailyTooExpensiveItems = 0;
+        dailyCustomerTrips = 0;
+        dailySalesRevenue = 0f;
+        dailyWholesaleCostOfGoods = 0f;
+        dailyProductOrderCosts = 0f;
     }
 
     public bool GetLeftMouseButtonDown()

@@ -20,6 +20,10 @@ public class GameSaveData
     public int dailyItemsSold;
     public int dailyMissingItems;
     public int dailyTooExpensiveItems;
+    public int dailyCustomerTrips;
+    public float dailySalesRevenue;
+    public float dailyWholesaleCostOfGoods;
+    public float dailyProductOrderCosts;
     public List<InventorySaveEntry> backroomInventory = new List<InventorySaveEntry>();
     public List<ShelfSaveEntry> shelves = new List<ShelfSaveEntry>();
     public List<DeliveryManager.QueuedDeliveryState> deliveries = new List<DeliveryManager.QueuedDeliveryState>();

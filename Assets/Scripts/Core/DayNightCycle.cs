@@ -114,6 +114,19 @@ public class DayNightCycle : MonoBehaviour
         ResetToOpeningTime();
     }
 
+    public void SkipToClosingTime()
+    {
+        if (currentPhase == DayPhase.AfterClose)
+        {
+            return;
+        }
+
+        currentTimeOfDayHours = closingHour;
+        currentPhase = DayPhase.AfterClose;
+        ApplyLighting();
+        gameManager?.HandleDayReachedClosingTime();
+    }
+
     public void ResetToOpeningTime()
     {
         currentTimeOfDayHours = openingHour;
