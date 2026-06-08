@@ -1029,7 +1029,25 @@ public partial class BasicUIManager : MonoBehaviour
         else
         {
             Time.timeScale = timeScaleBeforePause <= 0f ? 1f : timeScaleBeforePause;
+            RestoreGameplayCursorState();
         }
+    }
+
+    private void RestoreGameplayCursorState()
+    {
+        if (IsBlockingGameplayInput)
+        {
+            return;
+        }
+
+        FirstPersonPlayerController playerController = FirstPersonPlayerController.Instance;
+        if (playerController == null || !playerController.IsPlayerViewActive)
+        {
+            return;
+        }
+
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
     }
 
     private void ShowPauseSettingsPanel(bool showSettings)

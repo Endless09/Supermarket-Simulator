@@ -271,6 +271,10 @@ public partial class BasicUIManager
             UpdateComputerTexts();
             UpdateStoreComputerButtonStates();
         }
+        else
+        {
+            RestoreGameplayCursorState();
+        }
     }
 
     private void ShowComputerPanel(RectTransform panelToShow)
