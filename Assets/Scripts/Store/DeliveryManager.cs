@@ -221,6 +221,7 @@ public class DeliveryManager : MonoBehaviour
 
         carriedDeliveryCrate = crate;
         carriedDeliveryCrate.SetCarriedState(true);
+        ShowHudNotice("Picked up " + GetProductName(crate.Product) + " crate x" + crate.Amount + ". Place it on a warehouse rack.", HudNoticeType.Info);
     }
 
     public void UpdateCarriedCratePosition()
@@ -254,6 +255,7 @@ public class DeliveryManager : MonoBehaviour
         int amount = carriedDeliveryCrate.Amount;
         if (!gameManager.TryPlaceBoxOnWarehouseShelf(shelf, product, amount))
         {
+            ShowHudNotice("No rack space for " + GetProductName(product) + ".", HudNoticeType.Warning);
             return false;
         }
 
@@ -261,6 +263,7 @@ public class DeliveryManager : MonoBehaviour
         Destroy(carriedDeliveryCrate.gameObject);
         carriedDeliveryCrate = null;
         ArrangeDeliveryCrates();
+        ShowHudNotice("Stored " + GetProductName(product) + " x" + amount + " on warehouse rack.", HudNoticeType.Success);
         gameManager.NotifyStateChanged();
         return true;
     }
@@ -526,5 +529,20 @@ public class DeliveryManager : MonoBehaviour
         }
 
         receivingZoneRoot.position = new Vector3(deliveryDropOffPosition.x, 0f, deliveryDropOffPosition.z);
+    }
+
+    private static string GetProductName(ProductData product)
+    {
+        return product != null && !string.IsNullOrWhiteSpace(product.productName)
+            ? product.productName
+            : "Stock";
+    }
+
+    private void ShowHudNotice(string message, HudNoticeType type, float durationSeconds = 2f)
+    {
+        if (BasicUIManager.Instance != null)
+        {
+            BasicUIManager.Instance.ShowHudNotice(message, type, durationSeconds);
+        }
     }
 }

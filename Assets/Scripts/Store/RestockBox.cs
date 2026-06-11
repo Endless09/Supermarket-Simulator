@@ -10,6 +10,7 @@ public class RestockBox : MonoBehaviour
     private int amount;
     private TextMeshPro label;
     private Collider boxCollider;
+    private Rigidbody boxRigidbody;
     private bool isBeingCarried;
 
     public ProductData Product => product;
@@ -29,6 +30,7 @@ public class RestockBox : MonoBehaviour
         }
 
         boxCollider = GetComponent<Collider>();
+        EnsureRigidbody();
 
         if (label == null)
         {
@@ -45,6 +47,19 @@ public class RestockBox : MonoBehaviour
         if (boxCollider != null)
         {
             boxCollider.enabled = !carried;
+        }
+
+        if (boxRigidbody != null)
+        {
+            boxRigidbody.linearVelocity = Vector3.zero;
+            boxRigidbody.angularVelocity = Vector3.zero;
+            boxRigidbody.useGravity = !carried;
+            boxRigidbody.isKinematic = carried;
+
+            if (!carried)
+            {
+                boxRigidbody.WakeUp();
+            }
         }
 
         UpdateLabel();
@@ -78,6 +93,25 @@ public class RestockBox : MonoBehaviour
         label.outlineWidth = 0.18f;
 
         labelObject.AddComponent<BillboardToCamera>();
+    }
+
+    private void EnsureRigidbody()
+    {
+        if (boxRigidbody == null)
+        {
+            boxRigidbody = GetComponent<Rigidbody>();
+        }
+
+        if (boxRigidbody == null)
+        {
+            boxRigidbody = gameObject.AddComponent<Rigidbody>();
+        }
+
+        boxRigidbody.mass = 1.2f;
+        boxRigidbody.linearDamping = 0.15f;
+        boxRigidbody.angularDamping = 0.3f;
+        boxRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+        boxRigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
     }
 
     private void UpdateLabel()

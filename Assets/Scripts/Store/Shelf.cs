@@ -125,6 +125,33 @@ public class Shelf : MonoBehaviour
         return assignedProduct == null || assignedProduct == product || CurrentStock == 0;
     }
 
+    public bool TryGetRestockPreview(ProductData product, int amount, out int addableAmount, out string blockedReason)
+    {
+        addableAmount = 0;
+        blockedReason = string.Empty;
+
+        if (product == null || amount <= 0)
+        {
+            blockedReason = "No stock box selected";
+            return false;
+        }
+
+        if (SpaceRemaining <= 0)
+        {
+            blockedReason = "Shelf is full";
+            return false;
+        }
+
+        if (assignedProduct != null && assignedProduct != product && CurrentStock > 0)
+        {
+            blockedReason = "Shelf holds " + assignedProduct.productName;
+            return false;
+        }
+
+        addableAmount = Mathf.Min(amount, SpaceRemaining);
+        return addableAmount > 0;
+    }
+
     public int AddStock(int amount)
     {
         return AddStock(assignedProduct, amount);

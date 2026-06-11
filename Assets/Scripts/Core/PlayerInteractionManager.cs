@@ -118,9 +118,25 @@ public class PlayerInteractionManager : MonoBehaviour
 
         if (shelf != null)
         {
-            if (gameManager.IsCarryingRestockBox && shelf.CanAcceptRestock(gameManager.CarriedRestockProduct))
+            if (gameManager.IsCarryingRestockBox)
             {
-                return "[E] Stock shelf";
+                ProductData carriedProduct = gameManager.CarriedRestockProduct;
+                int carriedAmount = gameManager.CarriedRestockAmount;
+                if (!shelf.TryGetRestockPreview(carriedProduct, carriedAmount, out int addableAmount, out string blockedReason))
+                {
+                    return blockedReason;
+                }
+
+                string productName = carriedProduct != null ? carriedProduct.productName : "Stock";
+                int stockAfter = shelf.CurrentStock + addableAmount;
+                int leftoverAmount = carriedAmount - addableAmount;
+                if (leftoverAmount > 0)
+                {
+                    return "[E]/Left click Stock " + productName + " +" + addableAmount + ", " + leftoverAmount + " left in box";
+                }
+
+                return "[E]/Left click Stock " + productName + " +" + addableAmount +
+                       " (" + shelf.CurrentStock + "/" + shelf.MaxCapacity + " -> " + stockAfter + "/" + shelf.MaxCapacity + ")";
             }
 
             if (!gameManager.IsCarryingRestockBox && (deliveryManager == null || !deliveryManager.IsCarryingCrate))
@@ -199,6 +215,47 @@ public class PlayerInteractionManager : MonoBehaviour
                computer == null
             ? shelf
             : null;
+    }
+
+    public Shelf GetShelfUnderPointer()
+    {
+        if (mainCamera == null)
+        {
+            mainCamera = Camera.main;
+        }
+
+        if (mainCamera == null)
+        {
+            return null;
+        }
+
+        Ray ray = mainCamera.ScreenPointToRay(GetMouseScreenPosition());
+        RaycastHit[] hits = Physics.RaycastAll(ray, interactionDistance);
+        if (hits == null || hits.Length == 0)
+        {
+            return null;
+        }
+
+        Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+
+        foreach (RaycastHit hit in hits)
+        {
+            if (hit.collider.GetComponentInParent<StoreComputer>() != null ||
+                hit.collider.GetComponentInParent<DeliveryCrate>() != null ||
+                hit.collider.GetComponentInParent<WarehouseStockBox>() != null ||
+                hit.collider.GetComponentInParent<WarehouseShelf>() != null)
+            {
+                return null;
+            }
+
+            Shelf shelf = hit.collider.GetComponentInParent<Shelf>();
+            if (shelf != null)
+            {
+                return shelf;
+            }
+        }
+
+        return null;
     }
 
     public bool TryGetFocusedInteractable(out Shelf shelf, out DeliveryCrate crate, out WarehouseStockBox warehouseStockBox, out WarehouseShelf warehouseShelf, out StoreComputer computer)

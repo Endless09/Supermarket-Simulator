@@ -8,6 +8,16 @@ using UnityEngine.InputSystem;
 #endif
 
 /// <summary>
+/// Visual treatment for temporary HUD notices.
+/// </summary>
+public enum HudNoticeType
+{
+    Info,
+    Success,
+    Warning
+}
+
+/// <summary>
 /// Builds and updates the prototype HUD for store status, product ordering, shelf focus, and current tasks.
 /// </summary>
 public partial class BasicUIManager : MonoBehaviour
@@ -27,6 +37,9 @@ public partial class BasicUIManager : MonoBehaviour
     private static readonly Color TextColor = new Color(0.95f, 0.98f, 0.98f, 1f);
     private static readonly Color MutedTextColor = new Color(0.72f, 0.8f, 0.8f, 1f);
     private static readonly Color DarkTextColor = new Color(0.08f, 0.12f, 0.12f, 1f);
+    private static readonly Color HudNoticeInfoColor = new Color(0.7f, 0.9f, 1f, 1f);
+    private static readonly Color HudNoticeSuccessColor = new Color(0.45f, 1f, 0.62f, 1f);
+    private static readonly Color HudNoticeWarningColor = new Color(1f, 0.64f, 0.35f, 1f);
 
     [Header("Labels")]
     [SerializeField] private TMP_Text moneyText;
@@ -108,6 +121,9 @@ public partial class BasicUIManager : MonoBehaviour
     private RectTransform activeComputerPanel;
     private string computerMessage = "Welcome. Select an app to manage the store.";
     private float timeScaleBeforePause = 1f;
+    private string hudNoticeMessage = string.Empty;
+    private HudNoticeType hudNoticeType = HudNoticeType.Info;
+    private float hudNoticeExpiresAt;
 
     public bool IsBlockingGameplayInput => isPauseMenuOpen || isComputerOpen;
 
@@ -382,6 +398,18 @@ public partial class BasicUIManager : MonoBehaviour
     public void CloseStoreComputer()
     {
         SetStoreComputerOpen(false);
+    }
+
+    public void ShowHudNotice(string message, HudNoticeType type, float durationSeconds = 2f)
+    {
+        hudNoticeMessage = string.IsNullOrWhiteSpace(message) ? string.Empty : message;
+        hudNoticeType = type;
+        hudNoticeExpiresAt = Time.unscaledTime + Mathf.Max(0.1f, durationSeconds);
+
+        if (interactionPromptText != null)
+        {
+            UpdateInteractionPromptText();
+        }
     }
 
     public void ShowComputerMarket()
@@ -1436,6 +1464,16 @@ public partial class BasicUIManager : MonoBehaviour
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(hudNoticeMessage) && Time.unscaledTime < hudNoticeExpiresAt)
+        {
+            interactionPromptText.text = hudNoticeMessage;
+            interactionPromptText.color = GetHudNoticeColor(hudNoticeType);
+            return;
+        }
+
+        hudNoticeMessage = string.Empty;
+        interactionPromptText.color = SelectedProductColor;
+
         if (GameManager.Instance == null)
         {
             interactionPromptText.text = string.Empty;
@@ -1446,6 +1484,20 @@ public partial class BasicUIManager : MonoBehaviour
         interactionPromptText.text = string.IsNullOrWhiteSpace(prompt)
             ? "Tip: Use Tab to switch between Player View and Cursor/UI."
             : prompt;
+    }
+
+    private Color GetHudNoticeColor(HudNoticeType type)
+    {
+        switch (type)
+        {
+            case HudNoticeType.Success:
+                return HudNoticeSuccessColor;
+            case HudNoticeType.Warning:
+                return HudNoticeWarningColor;
+            case HudNoticeType.Info:
+            default:
+                return HudNoticeInfoColor;
+        }
     }
 
     private TMP_Text GetAnyExistingLabel()

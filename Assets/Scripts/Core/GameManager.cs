@@ -135,6 +135,11 @@ public class GameManager : MonoBehaviour
         {
             UpdateCarriedRestockBoxPosition();
 
+            if (GetLeftMouseButtonDown() && TryApplyRestockBoxToShelfUnderPointer())
+            {
+                return;
+            }
+
             if (GetRightMouseButtonDown())
             {
                 ThrowCarriedRestockBox();
@@ -520,6 +525,21 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    private static string GetProductName(ProductData product)
+    {
+        return product != null && !string.IsNullOrWhiteSpace(product.productName)
+            ? product.productName
+            : "Stock";
+    }
+
+    private void ShowHudNotice(string message, HudNoticeType type, float durationSeconds = 2f)
+    {
+        if (BasicUIManager.Instance != null)
+        {
+            BasicUIManager.Instance.ShowHudNotice(message, type, durationSeconds);
+        }
+    }
+
     public string GetStoreTaskStatus()
     {
         if (nextDayCustomerWarningPending && GetActiveCustomerCount() > 0)
@@ -761,6 +781,7 @@ public class GameManager : MonoBehaviour
     public void SpawnCarriedWarehouseBox(ProductData product, int amount, Vector3 position)
     {
         SpawnRestockBox(product, amount, position, true);
+        ShowHudNotice("Picked up " + GetProductName(product) + " x" + amount + ". Stock a matching shelf.", HudNoticeType.Info);
     }
 
     public void HandleRestockBoxClicked(RestockBox restockBox)
@@ -783,6 +804,7 @@ public class GameManager : MonoBehaviour
         carriedRestockBox = restockBox;
         carriedRestockBox.SetCarriedState(true);
         UpdateCarriedRestockBoxPosition();
+        ShowHudNotice("Picked up " + GetProductName(carriedRestockBox.Product) + " x" + carriedRestockBox.Amount + ". Stock a matching shelf.", HudNoticeType.Info);
         NotifyStateChanged();
     }
 
@@ -804,17 +826,21 @@ public class GameManager : MonoBehaviour
         }
 
         ProductData carriedProduct = carriedRestockBox.Product;
-        if (!shelf.CanAcceptRestock(carriedProduct))
+        int carriedAmount = carriedRestockBox.Amount;
+        if (!shelf.TryGetRestockPreview(carriedProduct, carriedAmount, out int addableAmount, out string blockedReason))
         {
+            ShowHudNotice(blockedReason, HudNoticeType.Warning);
             return;
         }
 
-        int addedAmount = shelf.AddStock(carriedProduct, carriedRestockBox.Amount);
-        int leftoverAmount = carriedRestockBox.Amount - addedAmount;
+        int addedAmount = shelf.AddStock(carriedProduct, addableAmount);
+        int leftoverAmount = carriedAmount - addedAmount;
+        string productName = GetProductName(carriedProduct);
 
         if (leftoverAmount > 0)
         {
             carriedRestockBox.SetAmount(leftoverAmount);
+            ShowHudNotice("Stocked " + productName + " +" + addedAmount + ". " + leftoverAmount + " left in box.", HudNoticeType.Success);
             NotifyStateChanged();
             return;
         }
@@ -823,7 +849,21 @@ public class GameManager : MonoBehaviour
         Destroy(carriedRestockBox.gameObject);
         carriedRestockBox = null;
         CreateCarriedEmptyBox(carriedProduct);
+        ShowHudNotice("Stocked " + productName + " +" + addedAmount + ". Box is empty.", HudNoticeType.Success);
         NotifyStateChanged();
+    }
+
+    private bool TryApplyRestockBoxToShelfUnderPointer()
+    {
+        EnsurePlayerInteractionManager();
+        Shelf shelf = playerInteractionManager != null ? playerInteractionManager.GetShelfUnderPointer() : null;
+        if (shelf == null)
+        {
+            return false;
+        }
+
+        TryApplyRestockBoxToShelf(shelf);
+        return true;
     }
 
     private void TryReturnCarriedRestockBoxToWarehouseShelf(WarehouseShelf shelf)
@@ -837,12 +877,16 @@ public class GameManager : MonoBehaviour
         if (warehouseManager == null ||
             !warehouseManager.TryReturnWarehouseBoxToShelf(shelf, carriedRestockBox.Product, carriedRestockBox.Amount))
         {
+            ShowHudNotice("No rack space for " + GetProductName(carriedRestockBox.Product) + ".", HudNoticeType.Warning);
             return;
         }
 
+        string productName = GetProductName(carriedRestockBox.Product);
+        int amount = carriedRestockBox.Amount;
         activeRestockBoxes.Remove(carriedRestockBox);
         Destroy(carriedRestockBox.gameObject);
         carriedRestockBox = null;
+        ShowHudNotice("Returned " + productName + " x" + amount + " to warehouse rack.", HudNoticeType.Success);
         NotifyStateChanged();
     }
 
@@ -857,7 +901,7 @@ public class GameManager : MonoBehaviour
         if (warehouseManager == null ||
             !warehouseManager.TryReturnWarehouseBox(carriedRestockBox.Product, carriedRestockBox.Amount))
         {
-            Debug.Log("No compatible warehouse shelf slot is available for this box.");
+            ShowHudNotice("No rack space for " + GetProductName(carriedRestockBox.Product) + ".", HudNoticeType.Warning);
             return;
         }
 
@@ -874,25 +918,49 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        Vector3 dropPosition = carriedRestockBox.transform.position;
-        if (TryGetPlacementPositionFromMouse(out Vector3 pointerPosition))
-        {
-            dropPosition = pointerPosition;
-        }
-        else if (mainCamera != null)
-        {
-            Vector3 forward = Vector3.ProjectOnPlane(mainCamera.transform.forward, Vector3.up).normalized;
-            if (forward.sqrMagnitude > 0.01f)
-            {
-                dropPosition = mainCamera.transform.position + forward * 1.4f;
-            }
-        }
-
-        dropPosition.y = 0.24f;
+        Vector3 dropPosition = GetRestockBoxDropPosition();
+        string productName = GetProductName(carriedRestockBox.Product);
         carriedRestockBox.transform.position = dropPosition;
         carriedRestockBox.SetCarriedState(false);
         carriedRestockBox = null;
+        ShowHudNotice("Dropped " + productName + " box. Look at it and press [E] to pick it up.", HudNoticeType.Info);
         NotifyStateChanged();
+    }
+
+    private Vector3 GetRestockBoxDropPosition()
+    {
+        Vector3 origin = carriedRestockBox != null ? carriedRestockBox.transform.position : transform.position;
+        Vector3 forward = transform.forward;
+
+        if (mainCamera != null)
+        {
+            origin = mainCamera.transform.position;
+            forward = Vector3.ProjectOnPlane(mainCamera.transform.forward, Vector3.up);
+        }
+
+        if (forward.sqrMagnitude <= 0.01f)
+        {
+            forward = Vector3.forward;
+        }
+
+        forward.Normalize();
+        Vector3 dropPosition = origin + forward * 1.35f;
+        Vector3 rayOrigin = dropPosition + Vector3.up * 2f;
+
+        if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit floorHit, 6f, floorLayer))
+        {
+            dropPosition = floorHit.point + Vector3.up * 0.35f;
+        }
+        else if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit anyHit, 6f))
+        {
+            dropPosition = anyHit.point + Vector3.up * 0.35f;
+        }
+        else
+        {
+            dropPosition.y = Mathf.Max(0.35f, dropPosition.y - 1f);
+        }
+
+        return dropPosition;
     }
 
     public void CreateCarriedEmptyBox(ProductData sourceProduct)
@@ -935,6 +1003,7 @@ public class GameManager : MonoBehaviour
         }
 
         ClearCarriedEmptyBox();
+        ShowHudNotice("Empty box disposed.", HudNoticeType.Success);
         NotifyStateChanged();
         return true;
     }
